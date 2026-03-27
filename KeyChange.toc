@@ -1,0 +1,10 @@
+## Interface: 120000, 120001
+## Version: 1.0.0
+## Title: KeyChange
+## Note: Simple Reminder to Change your Keystone at the end of a Mythic+ Instance.
+## Author: Jeremy-Gstein
+## SavedVariables: KeyChangeDB
+
+KeyChangeConfig.lua
+KeyChange.lua
+KeyChangeOptions.lua
