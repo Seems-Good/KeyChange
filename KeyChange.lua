@@ -210,7 +210,13 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         else
             currentRunLevel = nil
         end
-        runInProgress = true
+        runInProgress = false  -- block RESET during grace window
+        -- Midnight fires CHALLENGE_MODE_RESET immediately after START when the key
+        -- is consumed from the bag into the socket. Wait 5s before trusting a RESET
+        -- as a genuine mid-run depletion.
+        C_Timer.After(5, function()
+            runInProgress = true
+        end)
 
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         runInProgress = false
