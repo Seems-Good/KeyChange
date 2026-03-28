@@ -313,6 +313,7 @@ optFrame:SetScript("OnEvent", function(self, event, arg1)
         C_Timer.After(0, function()
             local panel = CreateFrame("Frame")
             panel.name = "KeyChange"
+            panel:Hide()  -- must be hidden at start; Settings system shows/hides it as needed
 
             BuildPanel(panel)
 

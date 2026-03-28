@@ -1,5 +1,5 @@
 ## Interface: 120000, 120001
-## Version: 1.0.1
+## Version: @project-version@
 ## Title: KeyChange
 ## Note: Simple Reminder to Change your Keystone at the end of a Mythic+ Instance.
 ## Author: Jeremy-Gstein
