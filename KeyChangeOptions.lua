@@ -264,7 +264,7 @@ local function BuildPanel(panel)
 
     local btnPrintKey = MakeButton(panel, "Print Key Info", 190, y, 220)
     btnPrintKey:SetScript("OnClick", function()
-        print("|cff00ccff[KeyChange]-v@project-version@|r ── Key Info Debug ──")
+        print("|cff00ccff[KeyChange]-@project-version@|r ── Key Info Debug ──")
 
         -- Helper to safely dump a table one level deep
         local function dumpVal(v)
