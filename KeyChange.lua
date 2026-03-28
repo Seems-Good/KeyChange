@@ -191,7 +191,7 @@ frame:SetScript("OnEvent", function(self, event, arg1)
 
     if event == "ADDON_LOADED" and arg1 == "KeyChange" then
         KeyChange:InitDB()
-        print("|cff00ccff[KeyChange]|r Loaded. Type |cffffd700/kc|r for options.")
+        print("|cff00ccff[KeyChange]-v@project-version@|r Loaded. Type |cffffd700/keychange|r for options.")
         self:UnregisterEvent("ADDON_LOADED")  -- no longer needed after this point
 
     elseif event == "CHALLENGE_MODE_START" then
