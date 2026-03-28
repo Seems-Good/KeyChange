@@ -253,16 +253,12 @@ end)
 -- Slash commands
 -- ──────────────────────────────────────────────
 
-SLASH_KEYCHANGE1 = "/kc"
-SLASH_KEYCHANGE2 = "/keychange"
+SLASH_KEYCHANGE1 = "/keychange"
 
-SlashCmdList["KEYCHANGE"] = function(msg)
-    local cmd = strtrim(msg):lower()
-    if cmd == "test" then
-        KeyChange:ShowReminder("Test — Change your key!")
-    elseif cmd == "options" or cmd == "" then
-        Settings.OpenToCategory("KeyChange")
+SlashCmdList["KEYCHANGE"] = function()
+    if KeyChange.optionsCategory then
+        Settings.OpenToCategory(KeyChange.optionsCategory.ID)
     else
-        print("|cff00ccff[KeyChange]|r  /kc · /kc test · /kc options")
+        print("|cff00ccff[KeyChange]|r Options not ready yet.")
     end
 end

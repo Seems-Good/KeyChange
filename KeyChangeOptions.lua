@@ -133,6 +133,10 @@ local function BuildPanel(panel)
         val = math.floor(val)
         KeyChange:Set("fontSize", val)
         sizeLabel:SetText(val .. "pt")
+        -- Live preview
+        if KeyChangeLabel and KeyChangeLabel:IsShown() then
+            KeyChangeLabel.text:SetFont(STANDARD_TEXT_FONT, val, "OUTLINE")
+        end
     end)
 
     y = y - 44
@@ -200,6 +204,14 @@ local function BuildPanel(panel)
         cb:GetFontString():SetTextColor(info.col[1], info.col[2], info.col[3])
         cb:SetScript("OnClick", function()
             KeyChange:Set("color", info.name)
+            -- Live preview
+            if KeyChangeLabel and KeyChangeLabel:IsShown() then
+                local hex = KeyChange:GetColorHex()
+                local r = tonumber(hex:sub(3,4), 16) / 255
+                local g = tonumber(hex:sub(5,6), 16) / 255
+                local b = tonumber(hex:sub(7,8), 16) / 255
+                KeyChangeLabel.text:SetTextColor(r, g, b, 1)
+            end
         end)
     end
 
@@ -319,6 +331,8 @@ optFrame:SetScript("OnEvent", function(self, event, arg1)
 
             local category = Settings.RegisterCanvasLayoutCategory(panel, "KeyChange")
             Settings.RegisterAddOnCategory(category)
+            KeyChange.optionsCategory = category
+            KeyChange.settingsCategory = category
         end)
         self:UnregisterEvent("ADDON_LOADED")
     end
