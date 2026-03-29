@@ -1,8 +1,8 @@
--- KeyChangeOptions.lua
+-- KeyChangeReminderOptions.lua
 -- Builds the addon settings panel (WoW Settings API, 10.0+)
--- Registered under AddOns → KeyChange in the game Options screen.
+-- Registered under AddOns → KeyChangeReminder in the game Options screen.
 
-KeyChange = KeyChange or {}
+KeyChangeReminder = KeyChangeReminder or {}
 
 -- ──────────────────────────────────────────────
 -- Helpers
@@ -55,12 +55,12 @@ local function BuildPanel(panel)
 
     local btnShowWarning = MakeButton(panel, "Show Warning", 190, y, 16)
     btnShowWarning:SetScript("OnClick", function()
-        KeyChange:ShowReminder("Change your key!")
+        KeyChangeReminder:ShowReminder("Change your key!")
     end)
 
     local btnHideWarning = MakeButton(panel, "Hide Warning", 190, y, 220)
     btnHideWarning:SetScript("OnClick", function()
-        KeyChange:HideReminder()
+        KeyChangeReminder:HideReminder()
     end)
 
     y = y - 34
@@ -69,10 +69,10 @@ local function BuildPanel(panel)
     local dragging = false
     local btnDrag = MakeButton(panel, "Drag to Reposition", 190, y, 16)
     btnDrag:SetScript("OnClick", function()
-        local lbl = KeyChangeLabel
+        local lbl = KeyChangeReminderLabel
         if not lbl then
-            KeyChange:ShowReminder("Drag me!")
-            lbl = KeyChangeLabel
+            KeyChangeReminder:ShowReminder("Drag me!")
+            lbl = KeyChangeReminderLabel
         end
         if not dragging then
             lbl:EnableMouse(true)
@@ -83,9 +83,9 @@ local function BuildPanel(panel)
                 self:StopMovingOrSizing()
                 -- Save position relative to UIParent CENTER
                 local point, _, _, x, y2 = self:GetPoint()
-                KeyChange:Set("anchorPoint", point)
-                KeyChange:Set("anchorX", math.floor(x + 0.5))
-                KeyChange:Set("anchorY", math.floor(y2 + 0.5))
+                KeyChangeReminder:Set("anchorPoint", point)
+                KeyChangeReminder:Set("anchorX", math.floor(x + 0.5))
+                KeyChangeReminder:Set("anchorY", math.floor(y2 + 0.5))
             end)
             btnDrag:SetText("Stop Dragging")
             dragging = true
@@ -100,12 +100,12 @@ local function BuildPanel(panel)
 
     local btnReset = MakeButton(panel, "Reset Position", 190, y, 220)
     btnReset:SetScript("OnClick", function()
-        KeyChange:Set("anchorPoint", "CENTER")
-        KeyChange:Set("anchorX", 0)
-        KeyChange:Set("anchorY", 200)
-        if KeyChangeLabel then
-            KeyChangeLabel:ClearAllPoints()
-            KeyChangeLabel:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
+        KeyChangeReminder:Set("anchorPoint", "CENTER")
+        KeyChangeReminder:Set("anchorX", 0)
+        KeyChangeReminder:Set("anchorY", 200)
+        if KeyChangeReminderLabel then
+            KeyChangeReminderLabel:ClearAllPoints()
+            KeyChangeReminderLabel:SetPoint("CENTER", UIParent, "CENTER", 0, 200)
         end
     end)
 
@@ -117,25 +117,25 @@ local function BuildPanel(panel)
     MakeLine(panel, y)
     y = y - 10
 
-    local sizeLabel = MakeLabel(panel, tostring(KeyChange:Get("fontSize") or 42) .. "pt", y, 300)
+    local sizeLabel = MakeLabel(panel, tostring(KeyChangeReminder:Get("fontSize") or 42) .. "pt", y, 300)
 
-    local fontSlider = CreateFrame("Slider", "KeyChangeFontSlider", panel, "OptionsSliderTemplate")
+    local fontSlider = CreateFrame("Slider", "KeyChangeReminderFontSlider", panel, "OptionsSliderTemplate")
     fontSlider:SetPoint("TOPLEFT", 16, y - 8)
     fontSlider:SetSize(270, 16)
     fontSlider:SetMinMaxValues(18, 96)
     fontSlider:SetValueStep(2)
     fontSlider:SetObeyStepOnDrag(true)
-    fontSlider:SetValue(KeyChange:Get("fontSize") or 42)
+    fontSlider:SetValue(KeyChangeReminder:Get("fontSize") or 42)
     _G[fontSlider:GetName() .. "Low"]:SetText("18pt")
     _G[fontSlider:GetName() .. "High"]:SetText("96pt")
     _G[fontSlider:GetName() .. "Text"]:SetText("")
     fontSlider:SetScript("OnValueChanged", function(self, val)
         val = math.floor(val)
-        KeyChange:Set("fontSize", val)
+        KeyChangeReminder:Set("fontSize", val)
         sizeLabel:SetText(val .. "pt")
         -- Live preview
-        if KeyChangeLabel and KeyChangeLabel:IsShown() then
-            KeyChangeLabel.text:SetFont(STANDARD_TEXT_FONT, val, "OUTLINE")
+        if KeyChangeReminderLabel and KeyChangeReminderLabel:IsShown() then
+            KeyChangeReminderLabel.text:SetFont(STANDARD_TEXT_FONT, val, "OUTLINE")
         end
     end)
 
@@ -147,7 +147,7 @@ local function BuildPanel(panel)
     MakeLine(panel, y)
     y = y - 10
 
-    local pulseVal = KeyChange:Get("pulseSpeed") or 1.0
+    local pulseVal = KeyChangeReminder:Get("pulseSpeed") or 1.0
     local function pulseLabel(v)
         if v <= 0.4 then return "Fast"
         elseif v >= 1.8 then return "Slow"
@@ -155,7 +155,7 @@ local function BuildPanel(panel)
     end
     local speedLabel = MakeLabel(panel, pulseLabel(pulseVal), y, 300)
 
-    local pulseSlider = CreateFrame("Slider", "KeyChangePulseSlider", panel, "OptionsSliderTemplate")
+    local pulseSlider = CreateFrame("Slider", "KeyChangeReminderPulseSlider", panel, "OptionsSliderTemplate")
     pulseSlider:SetPoint("TOPLEFT", 16, y - 1)
     pulseSlider:SetSize(270, 16)
     pulseSlider:SetMinMaxValues(0.3, 2.0)
@@ -167,11 +167,11 @@ local function BuildPanel(panel)
     _G[pulseSlider:GetName() .. "Text"]:SetText("")
     pulseSlider:SetScript("OnValueChanged", function(self, val)
         val = math.floor(val * 10 + 0.5) / 10  -- round to 1 decimal
-        KeyChange:Set("pulseSpeed", val)
+        KeyChangeReminder:Set("pulseSpeed", val)
         speedLabel:SetText(pulseLabel(val))
         -- Live preview: update running animation if visible
-        if KeyChangeLabel and KeyChangeLabel:IsShown() then
-            local anims = { KeyChangeLabel.pulseGroup:GetAnimations() }
+        if KeyChangeReminderLabel and KeyChangeReminderLabel:IsShown() then
+            local anims = { KeyChangeReminderLabel.pulseGroup:GetAnimations() }
             local half = val / 2
             for _, anim in ipairs(anims) do
                 anim:SetDuration(half)
@@ -203,14 +203,14 @@ local function BuildPanel(panel)
         local cb = MakeButton(panel, info.label, BTN_W, by, bx)
         cb:GetFontString():SetTextColor(info.col[1], info.col[2], info.col[3])
         cb:SetScript("OnClick", function()
-            KeyChange:Set("color", info.name)
+            KeyChangeReminder:Set("color", info.name)
             -- Live preview
-            if KeyChangeLabel and KeyChangeLabel:IsShown() then
-                local hex = KeyChange:GetColorHex()
+            if KeyChangeReminderLabel and KeyChangeReminderLabel:IsShown() then
+                local hex = KeyChangeReminder:GetColorHex()
                 local r = tonumber(hex:sub(3,4), 16) / 255
                 local g = tonumber(hex:sub(5,6), 16) / 255
                 local b = tonumber(hex:sub(7,8), 16) / 255
-                KeyChangeLabel.text:SetTextColor(r, g, b, 1)
+                KeyChangeReminderLabel.text:SetTextColor(r, g, b, 1)
             end
         end)
     end
@@ -229,23 +229,23 @@ local function BuildPanel(panel)
     y = y - 38
 
     local minKeyLabel = MakeLabel(panel,
-        "Level: " .. (KeyChange:Get("minKeyLevel") or 0) ..
-        ((KeyChange:Get("minKeyLevel") or 0) == 0 and " (Always remind)" or ""),
+        "Level: " .. (KeyChangeReminder:Get("minKeyLevel") or 0) ..
+        ((KeyChangeReminder:Get("minKeyLevel") or 0) == 0 and " (Always remind)" or ""),
         y, 300)
 
-    local minKeySlider = CreateFrame("Slider", "KeyChangeMinKeySlider", panel, "OptionsSliderTemplate")
+    local minKeySlider = CreateFrame("Slider", "KeyChangeReminderMinKeySlider", panel, "OptionsSliderTemplate")
     minKeySlider:SetPoint("TOPLEFT", 16, y - 8)
     minKeySlider:SetSize(270, 16)
     minKeySlider:SetMinMaxValues(0, 30)
     minKeySlider:SetValueStep(1)
     minKeySlider:SetObeyStepOnDrag(true)
-    minKeySlider:SetValue(KeyChange:Get("minKeyLevel") or 0)
+    minKeySlider:SetValue(KeyChangeReminder:Get("minKeyLevel") or 0)
     _G[minKeySlider:GetName() .. "Low"]:SetText("0")
     _G[minKeySlider:GetName() .. "High"]:SetText("30")
     _G[minKeySlider:GetName() .. "Text"]:SetText("")
     minKeySlider:SetScript("OnValueChanged", function(self, val)
         val = math.floor(val)
-        KeyChange:Set("minKeyLevel", val)
+        KeyChangeReminder:Set("minKeyLevel", val)
         minKeyLabel:SetText("Level: " .. val .. (val == 0 and " (Always remind)" or ""))
     end)
 
@@ -259,12 +259,12 @@ local function BuildPanel(panel)
 
     local btnTest = MakeButton(panel, "Test Reminder", 190, y, 16)
     btnTest:SetScript("OnClick", function()
-        KeyChange:ShowReminder("Test — Change your key!")
+        KeyChangeReminder:ShowReminder("Test — Change your key!")
     end)
 
     local btnPrintKey = MakeButton(panel, "Print Key Info", 190, y, 220)
     btnPrintKey:SetScript("OnClick", function()
-        print("|cff00ccff[KeyChange]-@project-version@|r ── Key Info Debug ──")
+        print("|cff00ccff[KeyChangeReminder]-@project-version@|r ── Key Info Debug ──")
 
         -- Helper to safely dump a table one level deep
         local function dumpVal(v)
@@ -310,7 +310,7 @@ local function BuildPanel(panel)
             print("  GetOwnedKeystoneMapID: NOT AVAILABLE")
         end
 
-        print("|cff00ccff[KeyChange]|r ────────────────────")
+        print("|cff00ccff[KeyChangeReminder]|r ────────────────────")
     end)
 end
 
@@ -320,19 +320,19 @@ end
 
 local optFrame = CreateFrame("Frame")
 optFrame:SetScript("OnEvent", function(self, event, arg1)
-    if event == "ADDON_LOADED" and arg1 == "KeyChange" then
+    if event == "ADDON_LOADED" and arg1 == "KeyChangeReminder" then
         -- Give the DB a moment to initialise, then build the panel
         C_Timer.After(0, function()
             local panel = CreateFrame("Frame")
-            panel.name = "KeyChange"
+            panel.name = "KeyChangeReminder"
             panel:Hide()  -- must be hidden at start; Settings system shows/hides it as needed
 
             BuildPanel(panel)
 
-            local category = Settings.RegisterCanvasLayoutCategory(panel, "KeyChange")
+            local category = Settings.RegisterCanvasLayoutCategory(panel, "KeyChangeReminder")
             Settings.RegisterAddOnCategory(category)
-            KeyChange.optionsCategory = category
-            KeyChange.settingsCategory = category
+            KeyChangeReminder.optionsCategory = category
+            KeyChangeReminder.settingsCategory = category
         end)
         self:UnregisterEvent("ADDON_LOADED")
     end

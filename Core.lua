@@ -1,9 +1,9 @@
--- KeyChange.lua
+-- KeyChangeReminder.lua (Core.lua)
 -- Core logic: events, keystone detection, reminder display
 
-KeyChange = KeyChange or {}
+KeyChangeReminder = KeyChangeReminder or {}
 
-local frame = CreateFrame("Frame", "KeyChangeFrame", UIParent)
+local frame = CreateFrame("Frame", "KeyChangeReminderFrame", UIParent)
 
 -- Tracks whether a run is currently in progress
 local runInProgress = false
@@ -45,7 +45,7 @@ end
 local function GetOrCreateLabel()
     if reminderLabel then return reminderLabel end
 
-    reminderLabel = CreateFrame("Frame", "KeyChangeLabel", UIParent)
+    reminderLabel = CreateFrame("Frame", "KeyChangeReminderLabel", UIParent)
     reminderLabel:SetSize(600, 80)
     reminderLabel:SetMovable(true)
     reminderLabel:EnableMouse(false)
@@ -92,17 +92,17 @@ local function ApplyLabelPosition()
     local lbl = GetOrCreateLabel()
     lbl:ClearAllPoints()
     lbl:SetPoint(
-        KeyChange:Get("anchorPoint") or "CENTER",
+        KeyChangeReminder:Get("anchorPoint") or "CENTER",
         UIParent,
-        KeyChange:Get("anchorPoint") or "CENTER",
-        KeyChange:Get("anchorX") or 0,
-        KeyChange:Get("anchorY") or 200
+        KeyChangeReminder:Get("anchorPoint") or "CENTER",
+        KeyChangeReminder:Get("anchorX") or 0,
+        KeyChangeReminder:Get("anchorY") or 200
     )
 end
 
 local function ApplyPulseSpeed()
     if not reminderLabel then return end
-    local speed = KeyChange:Get("pulseSpeed") or 1.0
+    local speed = KeyChangeReminder:Get("pulseSpeed") or 1.0
     -- Each animation is half the total cycle duration
     local half = speed / 2
     local anims = { reminderLabel.pulseGroup:GetAnimations() }
@@ -111,7 +111,7 @@ local function ApplyPulseSpeed()
     end
 end
 
-function KeyChange:ShowReminder(msg)
+function KeyChangeReminder:ShowReminder(msg)
     local lbl = GetOrCreateLabel()
     ApplyLabelPosition()
     ApplyPulseSpeed()
@@ -135,10 +135,10 @@ function KeyChange:ShowReminder(msg)
     reminderWatching = true
     frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 
-    print(string.format("|cff00ccff[KeyChange]|r %s", msg))
+    print(string.format("|cff00ccff[KeyChangeReminder]|r %s", msg))
 end
 
-function KeyChange:HideReminder()
+function KeyChangeReminder:HideReminder()
     DismissReminder()
 end
 
@@ -189,9 +189,9 @@ frame:RegisterEvent("CHALLENGE_MODE_RESET")
 
 frame:SetScript("OnEvent", function(self, event, arg1)
 
-    if event == "ADDON_LOADED" and arg1 == "KeyChange" then
-        KeyChange:InitDB()
-        print("|cff00ccff[KeyChange]-@project-version@|r Loaded. Type |cffffd700/keychange|r for options.")
+    if event == "ADDON_LOADED" and arg1 == "KeyChangeReminder" then
+        KeyChangeReminder:InitDB()
+        print("|cff00ccff[KeyChangeReminder]-@project-version@|r Loaded. Type |cffffd700/keychange|r for options.")
         self:UnregisterEvent("ADDON_LOADED")  -- no longer needed after this point
 
     elseif event == "CHALLENGE_MODE_START" then
@@ -221,12 +221,12 @@ frame:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         runInProgress = false
         C_Timer.After(3, function()
-            local minLevel = KeyChange:Get("minKeyLevel") or 0
+            local minLevel = KeyChangeReminder:Get("minKeyLevel") or 0
             if minLevel > 0 and currentRunLevel and currentRunLevel < minLevel then
                 currentRunLevel = nil
                 return
             end
-            KeyChange:ShowReminder("Change your key!")
+            KeyChangeReminder:ShowReminder("Change your key!")
             currentRunLevel = nil
         end)
 
@@ -236,7 +236,7 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         if runInProgress then
             runInProgress = false
             C_Timer.After(2, function()
-                KeyChange:ShowReminder("Change your key!")
+                KeyChangeReminder:ShowReminder("Change your key!")
                 currentRunLevel = nil
             end)
         end
@@ -254,11 +254,13 @@ end)
 -- ──────────────────────────────────────────────
 
 SLASH_KEYCHANGE1 = "/keychange"
+SLASH_KEYCHANGE2 = "/kcr"
+
 
 SlashCmdList["KEYCHANGE"] = function()
-    if KeyChange.optionsCategory then
-        Settings.OpenToCategory(KeyChange.optionsCategory.ID)
+    if KeyChangeReminder.optionsCategory then
+        Settings.OpenToCategory(KeyChangeReminder.optionsCategory.ID)
     else
-        print("|cff00ccff[KeyChange]|r Options not ready yet.")
+        print("|cff00ccff[KeyChangeReminder]|r Options not ready yet.")
     end
 end

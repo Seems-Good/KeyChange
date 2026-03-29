@@ -1,7 +1,7 @@
--- KeyChangeConfig.lua
+-- KeyChangeReminderConfig.lua
 -- Default settings and SavedVariables helpers
 
-KeyChange = KeyChange or {}
+KeyChangeReminder = KeyChangeReminder or {}
 
 local DEFAULTS = {
     enabled       = true,
@@ -15,7 +15,7 @@ local DEFAULTS = {
 }
 
 -- Color presets (label -> hex)
-KeyChange.COLOR_PRESETS = {
+KeyChangeReminder.COLOR_PRESETS = {
     RED    = "ffff3333",
     ORANGE = "ffff9900",
     YELLOW = "ffffff00",
@@ -24,30 +24,30 @@ KeyChange.COLOR_PRESETS = {
     GREEN  = "ff00ff88",
 }
 
-function KeyChange:InitDB()
-    if not KeyChangeDB then
-        KeyChangeDB = {}
+function KeyChangeReminder:InitDB()
+    if not KeyChangeReminderDB then
+        KeyChangeReminderDB = {}
     end
     -- Fill in any missing keys from defaults
     for k, v in pairs(DEFAULTS) do
-        if KeyChangeDB[k] == nil then
-            KeyChangeDB[k] = v
+        if KeyChangeReminderDB[k] == nil then
+            KeyChangeReminderDB[k] = v
         end
     end
-    self.db = KeyChangeDB
+    self.db = KeyChangeReminderDB
 end
 
-function KeyChange:Get(key)
+function KeyChangeReminder:Get(key)
     return self.db and self.db[key]
 end
 
-function KeyChange:Set(key, value)
+function KeyChangeReminder:Set(key, value)
     if self.db then
         self.db[key] = value
     end
 end
 
-function KeyChange:GetColorHex()
+function KeyChangeReminder:GetColorHex()
     local preset = self:Get("color") or "CYAN"
-    return KeyChange.COLOR_PRESETS[preset] or KeyChange.COLOR_PRESETS["CYAN"]
+    return KeyChangeReminder.COLOR_PRESETS[preset] or KeyChangeReminder.COLOR_PRESETS["CYAN"]
 end

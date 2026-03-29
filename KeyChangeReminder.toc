@@ -1,10 +1,15 @@
-## Interface: 120000, 120001
+## Interface: 120000, 120001, 120005
 ## Version: @project-version@
 ## Title: KeyChangeReminder
 ## Note: Simple Reminder to Change your Keystone at the end of a Mythic+ Instance.
 ## Author: Jeremy-Gstein
 ## IconTexture: Interface\Icons\inv_misc_key_04
-## SavedVariables: KeyChangeDB
+## SavedVariables: KeyChangeReminderDB
+
+
+## X-License: Licensed under the MIT License. See the LICENSE file in the project root for details.
+## X-Website: https://github.com/Seems-Good/KeyChangeReminder
+## X-Curse-Project-ID: 1498155 
 
 Config.lua
 Core.lua
