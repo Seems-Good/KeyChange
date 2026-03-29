@@ -6,7 +6,6 @@
 ## IconTexture: Interface\Icons\inv_misc_key_04
 ## SavedVariables: KeyChangeReminderDB
 
-
 ## X-License: Licensed under the MIT License. See the LICENSE file in the project root for details.
 ## X-Website: https://github.com/Seems-Good/KeyChangeReminder
 ## X-Curse-Project-ID: 1498155 
