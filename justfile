@@ -18,7 +18,7 @@
 # CONFIGURE PROJECT VARIABLES #
 ###############################
 # Specify name of addon
-addon_name := "KeyChange"
+addon_name := "KeyChangeReminder"
 
 # DEFAULT PATHS - Set based on the OS family
 os := os_family()
