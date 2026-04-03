@@ -4,14 +4,15 @@
 KeyChangeReminder = KeyChangeReminder or {}
 
 local DEFAULTS = {
-    enabled       = true,
-    minKeyLevel   = 0,          -- 0 = always remind regardless of key level
-    color         = "CYAN",     -- preset name
-    anchorPoint   = "CENTER",   -- WoW anchor point
-    anchorX       = 0,
-    anchorY       = 200,
-    fontSize      = 42,
-    pulseSpeed    = 1.0,        -- seconds per half-cycle (0.3 = fast, 2.0 = slow)
+    enabled        = true,
+    minKeyLevel    = 0,          -- 0 = always remind regardless of key level
+    color          = "CYAN",     -- preset name
+    anchorPoint    = "CENTER",   -- WoW anchor point
+    anchorX        = 0,
+    anchorY        = 200,
+    fontSize       = 42,
+    pulseSpeed     = 1.0,        -- seconds per half-cycle (0.3 = fast, 2.0 = slow)
+    talentReminder = false,      -- off by default
 }
 
 -- Color presets (label -> hex)

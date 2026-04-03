@@ -45,20 +45,31 @@ end
 -- ──────────────────────────────────────────────
 
 local function BuildPanel(panel)
+    -- Wrap everything in a scroll frame so the panel doesn't overflow.
+    -- Content width is hardcoded because the panel has no size yet at build time
+    -- (the Settings system sizes it later).
+    local scrollFrame = CreateFrame("ScrollFrame", "KeyChangeReminderScrollFrame", panel, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+    scrollFrame:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 0)
+
+    local content = CreateFrame("Frame", nil, scrollFrame)
+    content:SetWidth(560)
+    scrollFrame:SetScrollChild(content)
+
     local y = -10  -- running Y cursor (negative = downward)
 
     -- ── Position ──────────────────────────────
-    MakeHeader(panel, "Position", y)
+    MakeHeader(content, "Position", y)
     y = y - 26
-    MakeLine(panel, y)
+    MakeLine(content, y)
     y = y - 14
 
-    local btnShowWarning = MakeButton(panel, "Show Warning", 190, y, 16)
+    local btnShowWarning = MakeButton(content, "Show Warning", 190, y, 16)
     btnShowWarning:SetScript("OnClick", function()
         KeyChangeReminder:ShowReminder("Change your key!")
     end)
 
-    local btnHideWarning = MakeButton(panel, "Hide Warning", 190, y, 220)
+    local btnHideWarning = MakeButton(content, "Hide Warning", 190, y, 220)
     btnHideWarning:SetScript("OnClick", function()
         KeyChangeReminder:HideReminder()
     end)
@@ -67,7 +78,7 @@ local function BuildPanel(panel)
 
     -- Drag-to-reposition toggle
     local dragging = false
-    local btnDrag = MakeButton(panel, "Drag to Reposition", 190, y, 16)
+    local btnDrag = MakeButton(content, "Drag to Reposition", 190, y, 16)
     btnDrag:SetScript("OnClick", function()
         local lbl = KeyChangeReminderLabel
         if not lbl then
@@ -98,7 +109,7 @@ local function BuildPanel(panel)
         end
     end)
 
-    local btnReset = MakeButton(panel, "Reset Position", 190, y, 220)
+    local btnReset = MakeButton(content, "Reset Position", 190, y, 220)
     btnReset:SetScript("OnClick", function()
         KeyChangeReminder:Set("anchorPoint", "CENTER")
         KeyChangeReminder:Set("anchorX", 0)
@@ -112,14 +123,14 @@ local function BuildPanel(panel)
     y = y - 44
 
     -- ── Font Size ──────────────────────────────
-    MakeHeader(panel, "Font Size", y)
+    MakeHeader(content, "Font Size", y)
     y = y - 20
-    MakeLine(panel, y)
+    MakeLine(content, y)
     y = y - 10
 
-    local sizeLabel = MakeLabel(panel, tostring(KeyChangeReminder:Get("fontSize") or 42) .. "pt", y, 300)
+    local sizeLabel = MakeLabel(content, tostring(KeyChangeReminder:Get("fontSize") or 42) .. "pt", y, 300)
 
-    local fontSlider = CreateFrame("Slider", "KeyChangeReminderFontSlider", panel, "OptionsSliderTemplate")
+    local fontSlider = CreateFrame("Slider", "KeyChangeReminderFontSlider", content, "OptionsSliderTemplate")
     fontSlider:SetPoint("TOPLEFT", 16, y - 8)
     fontSlider:SetSize(270, 16)
     fontSlider:SetMinMaxValues(18, 96)
@@ -142,9 +153,9 @@ local function BuildPanel(panel)
     y = y - 44
 
     -- ── Animation Speed ────────────────────────
-    MakeHeader(panel, "Pulse Speed", y)
+    MakeHeader(content, "Pulse Speed", y)
     y = y - 20
-    MakeLine(panel, y)
+    MakeLine(content, y)
     y = y - 10
 
     local pulseVal = KeyChangeReminder:Get("pulseSpeed") or 1.0
@@ -153,9 +164,9 @@ local function BuildPanel(panel)
         elseif v >= 1.8 then return "Slow"
         else return "Medium" end
     end
-    local speedLabel = MakeLabel(panel, pulseLabel(pulseVal), y, 300)
+    local speedLabel = MakeLabel(content, pulseLabel(pulseVal), y, 300)
 
-    local pulseSlider = CreateFrame("Slider", "KeyChangeReminderPulseSlider", panel, "OptionsSliderTemplate")
+    local pulseSlider = CreateFrame("Slider", "KeyChangeReminderPulseSlider", content, "OptionsSliderTemplate")
     pulseSlider:SetPoint("TOPLEFT", 16, y - 1)
     pulseSlider:SetSize(270, 16)
     pulseSlider:SetMinMaxValues(0.3, 2.0)
@@ -179,9 +190,9 @@ local function BuildPanel(panel)
         end
     end)
     y = y - 46
-    MakeHeader(panel, "Text Color", y)
+    MakeHeader(content, "Text Color", y)
     y = y - 20
-    MakeLine(panel, y)
+    MakeLine(content, y)
     y = y - 18
 
     local COLOR_LAYOUT = {
@@ -200,7 +211,7 @@ local function BuildPanel(panel)
         local bx = 16 + col * (BTN_W + GAP)
         local by = y - row * (BTN_H + GAP)
 
-        local cb = MakeButton(panel, info.label, BTN_W, by, bx)
+        local cb = MakeButton(content, info.label, BTN_W, by, bx)
         cb:GetFontString():SetTextColor(info.col[1], info.col[2], info.col[3])
         cb:SetScript("OnClick", function()
             KeyChangeReminder:Set("color", info.name)
@@ -218,22 +229,22 @@ local function BuildPanel(panel)
     y = y - 72
 
     -- ── Minimum Key Level ──────────────────────
-    MakeHeader(panel, "Minimum Key Level", y)
+    MakeHeader(content, "Minimum Key Level", y)
     y = y - 26
-    MakeLine(panel, y)
+    MakeLine(content, y)
     y = y - 10
 
-    MakeLabel(panel,
+    MakeLabel(content,
         "Only remind me when the key is at or above this level.\nSet to 0 to always remind.",
         y, 16)
     y = y - 38
 
-    local minKeyLabel = MakeLabel(panel,
+    local minKeyLabel = MakeLabel(content,
         "Level: " .. (KeyChangeReminder:Get("minKeyLevel") or 0) ..
         ((KeyChangeReminder:Get("minKeyLevel") or 0) == 0 and " (Always remind)" or ""),
         y, 300)
 
-    local minKeySlider = CreateFrame("Slider", "KeyChangeReminderMinKeySlider", panel, "OptionsSliderTemplate")
+    local minKeySlider = CreateFrame("Slider", "KeyChangeReminderMinKeySlider", content, "OptionsSliderTemplate")
     minKeySlider:SetPoint("TOPLEFT", 16, y - 8)
     minKeySlider:SetSize(270, 16)
     minKeySlider:SetMinMaxValues(0, 30)
@@ -251,20 +262,46 @@ local function BuildPanel(panel)
 
     y = y - 44
 
-    -- ── Debug ──────────────────────────────────
-    MakeHeader(panel, "Debug", y)
+    -- ── Talent Reminder ────────────────────────
+    MakeHeader(content, "Talent Reminder", y)
     y = y - 26
-    MakeLine(panel, y)
+    MakeLine(content, y)
+    y = y - 18
+
+    MakeLabel(content, "Show a reminder to switch to your M+ talents when entering a dungeon.", y, 16)
+    y = y - 28
+
+    local talentCB = CreateFrame("CheckButton", "KeyChangeReminderTalentCB", content, "InterfaceOptionsCheckButtonTemplate")
+    talentCB:SetPoint("TOPLEFT", 16, y)
+    _G[talentCB:GetName() .. "Text"]:SetText("Enable talent reminder")
+    talentCB:SetChecked(KeyChangeReminder:Get("talentReminder") or false)
+    talentCB:SetScript("OnClick", function(self)
+        local enabled = self:GetChecked()
+        KeyChangeReminder:Set("talentReminder", enabled)
+        if enabled then
+            -- Already inside a dungeon when the user turns this on — show immediately
+            KeyChangeReminder:CheckAndShowTalentReminder()
+        else
+            KeyChangeReminder:HideTalentReminder()
+        end
+    end)
+
+    y = y - 34
+
+    -- ── Debug ──────────────────────────────────
+    MakeHeader(content, "Debug", y)
+    y = y - 26
+    MakeLine(content, y)
     y = y - 14
 
-    local btnTest = MakeButton(panel, "Test Reminder", 190, y, 16)
+    local btnTest = MakeButton(content, "Test Reminder", 190, y, 16)
     btnTest:SetScript("OnClick", function()
         KeyChangeReminder:ShowReminder("Test — Change your key!")
     end)
 
-    local btnPrintKey = MakeButton(panel, "Print Key Info", 190, y, 220)
+    local btnPrintKey = MakeButton(content, "Print Key Info", 190, y, 220)
     btnPrintKey:SetScript("OnClick", function()
-        print("|cff00ccff[KeyChangeReminder]-@project-version@|r ── Key Info Debug ──")
+        print("|cff00ccff[KeyChangeReminder]-v1.0.7|r ── Key Info Debug ──")
 
         -- Helper to safely dump a table one level deep
         local function dumpVal(v)
@@ -312,6 +349,9 @@ local function BuildPanel(panel)
 
         print("|cff00ccff[KeyChangeReminder]|r ────────────────────")
     end)
+
+    -- Trim content height to fit the actual layout
+    content:SetHeight(math.abs(y) + 20)
 end
 
 -- ──────────────────────────────────────────────

@@ -15,6 +15,7 @@ local currentRunLevel = nil
 
 local reminderLabel = nil
 local reminderWatching = false
+local talentReminderWatching = false
 
 local function GetCurrentKeystoneState()
     local mapID, level = nil, nil
@@ -32,10 +33,28 @@ end
 local function DismissReminder()
     if not reminderWatching then return end
     reminderWatching = false
-    frame:UnregisterEvent("ZONE_CHANGED_NEW_AREA")
+    -- Only unregister if the talent reminder isn't also relying on this event
+    if not talentReminderWatching then
+        frame:UnregisterEvent("ZONE_CHANGED_NEW_AREA")
+    end
     if reminderLabel and reminderLabel:IsShown() then
         reminderLabel.pulseGroup:Stop()
         -- Quick final fade out
+        reminderLabel.exitGroup:Stop()
+        reminderLabel:SetAlpha(1)
+        reminderLabel.exitGroup:Play()
+    end
+end
+
+local function DismissTalentReminder()
+    if not talentReminderWatching then return end
+    talentReminderWatching = false
+    -- Only unregister if the key reminder isn't also relying on this event
+    if not reminderWatching then
+        frame:UnregisterEvent("ZONE_CHANGED_NEW_AREA")
+    end
+    if reminderLabel and reminderLabel:IsShown() then
+        reminderLabel.pulseGroup:Stop()
         reminderLabel.exitGroup:Stop()
         reminderLabel:SetAlpha(1)
         reminderLabel.exitGroup:Play()
@@ -142,6 +161,29 @@ function KeyChangeReminder:HideReminder()
     DismissReminder()
 end
 
+function KeyChangeReminder:ShowTalentReminder()
+    self:ShowReminder("Switch to your M+ talents!")
+    -- Override the watch flags: this is a talent reminder, not a key change reminder
+    reminderWatching = false
+    talentReminderWatching = true
+    frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")  -- ensure zone-out dismiss is active
+end
+
+function KeyChangeReminder:HideTalentReminder()
+    DismissTalentReminder()
+end
+
+-- Called when the checkbox is enabled mid-session so we don't need a re-zone to trigger
+function KeyChangeReminder:CheckAndShowTalentReminder()
+    local inInstance, instanceType = IsInInstance()
+    local level = C_MythicPlus and C_MythicPlus.GetOwnedKeystoneLevel
+        and C_MythicPlus.GetOwnedKeystoneLevel()
+    if inInstance and instanceType == "party"
+       and type(level) == "number" and level > 0 then
+        self:ShowTalentReminder()
+    end
+end
+
 -- ──────────────────────────────────────────────
 -- Keystone helpers
 -- ──────────────────────────────────────────────
@@ -187,6 +229,7 @@ frame:RegisterEvent("CHALLENGE_MODE_START")
 frame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 frame:RegisterEvent("CHALLENGE_MODE_RESET")
 frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 frame:SetScript("OnEvent", function(self, event, arg1)
 
@@ -198,6 +241,8 @@ frame:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "CHALLENGE_MODE_START" then
         -- A new run is starting — any pending "change your key" reminder is stale
         DismissReminder()
+        -- Also dismiss the talent reminder; the run has begun
+        DismissTalentReminder()
         -- Determine if this is our key or someone else's
         local ownedMapID = nil
         if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneChallengeMapID then
@@ -244,13 +289,34 @@ frame:SetScript("OnEvent", function(self, event, arg1)
             end)
         end
     elseif event == "PLAYER_REGEN_DISABLED" then
-        -- Entered combat — hide the reminder so it doesn't clutter the screen mid-pull
+        -- Entered combat — hide any visible reminder so it doesn't clutter the screen mid-pull
         DismissReminder()
+        DismissTalentReminder()
 
-    elseif event == "ZONE_CHANGED_NEW_AREA" and reminderWatching then
-        local inInstance = IsInInstance and select(2, IsInInstance()) ~= "none"
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Show talent reminder when entering a M+ dungeon.
+        -- Delay slightly to let the instance type settle after zone-in.
+        if KeyChangeReminder:Get("talentReminder") then
+            C_Timer.After(3, function()
+                local inInstance, instanceType = IsInInstance()
+                local level = C_MythicPlus and C_MythicPlus.GetOwnedKeystoneLevel
+                    and C_MythicPlus.GetOwnedKeystoneLevel()
+                if inInstance and instanceType == "party"
+                   and type(level) == "number" and level > 0 then
+                    KeyChangeReminder:ShowTalentReminder()
+                end
+            end)
+        end
+
+    elseif event == "ZONE_CHANGED_NEW_AREA" then
+        local inInstance = select(2, IsInInstance()) ~= "none"
         if not inInstance then
-            DismissReminder()
+            if reminderWatching then
+                DismissReminder()
+            end
+            if talentReminderWatching then
+                DismissTalentReminder()
+            end
         end
 
     end  -- end if/elseif event chain
