@@ -186,15 +186,18 @@ frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("CHALLENGE_MODE_START")
 frame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
 frame:RegisterEvent("CHALLENGE_MODE_RESET")
+frame:RegisterEvent("PLAYER_REGEN_DISABLED")
 
 frame:SetScript("OnEvent", function(self, event, arg1)
 
     if event == "ADDON_LOADED" and arg1 == "KeyChangeReminder" then
         KeyChangeReminder:InitDB()
-        print("|cff00ccff[KeyChangeReminder]-@project-version@|r Loaded. Type |cffffd700/keychange|r for options.")
+        print("|cff00ccff[KeyChangeReminder]-v1.0.7|r Loaded. Type |cffffd700/keychange|r for options.")
         self:UnregisterEvent("ADDON_LOADED")  -- no longer needed after this point
 
     elseif event == "CHALLENGE_MODE_START" then
+        -- A new run is starting — any pending "change your key" reminder is stale
+        DismissReminder()
         -- Determine if this is our key or someone else's
         local ownedMapID = nil
         if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneChallengeMapID then
@@ -240,6 +243,10 @@ frame:SetScript("OnEvent", function(self, event, arg1)
                 currentRunLevel = nil
             end)
         end
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        -- Entered combat — hide the reminder so it doesn't clutter the screen mid-pull
+        DismissReminder()
+
     elseif event == "ZONE_CHANGED_NEW_AREA" and reminderWatching then
         local inInstance = IsInInstance and select(2, IsInInstance()) ~= "none"
         if not inInstance then
