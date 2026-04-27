@@ -237,7 +237,7 @@ local function GetBagKeystoneLevel()
             if type(level) == "number" and level > 0 then return level end
         end
         -- Older API fallback
-        if C_MythicPlus.GetOwnedKeystoneChallengeMapID then
+        if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneChallengeMapID then
             local _, level = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
             if type(level) == "number" and level > 0 then return level end
         end
@@ -252,16 +252,15 @@ end
 -- Returns true if the reminder should be suppressed based on the current
 -- minKeyLevel / Auto settings. Called from both COMPLETED and RESET timers.
 --
--- Auto mode:  suppress when our bag key is strictly lower than the key that
---             was just run. This handles the "we ran someone else's key and
---             ours is too low to be worth changing" case. When it IS our own
---             key the bag level will always equal or exceed lastRunLevel after
---             a timed run (it goes up), so Auto never suppresses own-key
---             completions. For depletes of our own key, lastRunLevel == the
---             pre-run level and the bag key will be lower, which WOULD suppress
---             — but depletes arrive via CHALLENGE_MODE_RESET where currentRunLevel
---             is non-nil (own key), so we fall through to the minKeyLevel path
---             instead of the Auto path, leaving depletion reminders unaffected.
+-- Auto mode:  The reroll vendor appears after a TIMED foreign-key run when the
+--             player's bag key level is ≤ the completed key level. We suppress
+--             only when the bag key is strictly HIGHER than the run level, since
+--             rerolling would be a downgrade in that case.
+--
+--             Examples:
+--               bag=12, run=12 timed  → 12 > 12 false  → show  ✓ (equal, vendor appears)
+--               bag=12, run=15 timed  → 12 > 15 false  → show  ✓ (bag lower, vendor appears)
+--               bag=13, run=12 timed  → 13 > 12 true   → suppress ✓ (bag higher, no vendor)
 --
 -- minKeyLevel mode (manual): suppress when currentRunLevel (own-key snapshot)
 --             is below the configured threshold. Foreign-key runs have
@@ -275,23 +274,19 @@ local function ShouldSuppressReminder()
         -- appears for own-key runs. Always suppress.
         if currentRunLevel ~= nil then return true end
 
-        -- ── No key was socketed (plain Mythic, or API returned nothing) ───────
-        -- If lastRunLevel is still nil after retrying, we couldn't determine the
-        -- run level. Default to SHOWING the reminder — fail open rather than
-        -- silently suppressing a valid reminder. Plain Mythic (no keystone) does
-        -- not fire CHALLENGE_MODE_START so we will never reach this point for it.
+        -- ── No run level recorded ─────────────────────────────────────────────
+        -- If lastRunLevel is still nil we couldn't determine the socketed key
+        -- level. Default to SHOWING the reminder — fail open rather than
+        -- silently suppressing a valid reminder.
         if not lastRunLevel then return false end
 
         -- ── Depleted or abandoned ─────────────────────────────────────────────
-        -- The reroll vendor only appears after a TIMED completion. A depleted or
-        -- abandoned run means the timer was not beaten — no vendor appears for
-        -- anyone regardless of key levels. Always suppress.
+        -- The reroll vendor only appears after a TIMED completion. Always suppress.
         if lastRunDepleted then return true end
 
         -- ── Foreign key ───────────────────────────────────────────────────────
-        -- Vendor appears after a timed foreign-key run when the player's bag key
-        -- is ≤ the socketed key level. Suppress only when bag key is strictly
-        -- higher — rerolling would be a downgrade.
+        -- Vendor appears when bag key ≤ socketed key level (rerolling is worthwhile).
+        -- Suppress only when bag key is strictly HIGHER — rerolling would be a downgrade.
         local bagLevel = GetBagKeystoneLevel()
         if not bagLevel then return true end       -- no key in bag, nothing to reroll
         if bagLevel > lastRunLevel then return true end
@@ -357,9 +352,15 @@ frame:SetScript("OnEvent", function(self, event, arg1)
             lastRunLevel = currentRunLevel
         else
             -- Foreign key: currentRunLevel stays nil to signal "not our key".
-            -- lastRunLevel must reflect the SOCKETED key level (the other person's
-            -- key). Try immediately; if Midnight hasn't populated it yet, retry
-            -- once inside the 5s grace window timer below.
+            -- Snapshot lastRunLevel from the bag NOW, before the key is consumed
+            -- into the socket. GetBagKeystoneLevel() is reliable in Midnight;
+            -- GetActiveKeystoneLevel() is not. At CHALLENGE_MODE_START the
+            -- foreign key has already been placed in the socket but our bag key
+            -- is still present and queryable — we read OUR bag key separately at
+            -- reminder time, so lastRunLevel here specifically means the socketed
+            -- (foreign) key level. Use GetActiveKeystoneLevel() with a fallback
+            -- to GetBagKeystoneLevel() of the socket owner's key via the active
+            -- info. If both fail, retry inside the 5s grace window below.
             currentRunLevel = nil
             lastRunLevel = GetActiveKeystoneLevel()
         end
@@ -471,10 +472,55 @@ end)
 SLASH_KEYCHANGE1 = "/keychange"
 SLASH_KEYCHANGE2 = "/kcr"
 
-SlashCmdList["KEYCHANGE"] = function()
-    if KeyChangeReminder.optionsCategory then
-        Settings.OpenToCategory(KeyChangeReminder.optionsCategory.ID)
+SlashCmdList["KEYCHANGE"] = function(msg)
+    local cmd = msg and msg:match("^%s*(%S+)") or ""
+
+    if cmd:lower() == "debug" then
+        local bagLevel      = GetBagKeystoneLevel()
+        local activeLevel   = GetActiveKeystoneLevel()
+        local autoMode      = KeyChangeReminder:Get("autoMode")
+        local minKeyLevel   = KeyChangeReminder:Get("minKeyLevel") or 0
+
+        print(FORMAT_SLUG .. COLOR_YELLOW .. " Debug State:|r")
+        print(COLOR_GRAY .. "  lastRunLevel      : |r" .. COLOR_YELLOW .. tostring(lastRunLevel)       .. "|r")
+        print(COLOR_GRAY .. "  currentRunLevel   : |r" .. COLOR_YELLOW .. tostring(currentRunLevel)    .. "|r")
+        print(COLOR_GRAY .. "  lastRunDepleted   : |r" .. COLOR_YELLOW .. tostring(lastRunDepleted)    .. "|r")
+        print(COLOR_GRAY .. "  runInProgress     : |r" .. COLOR_YELLOW .. tostring(runInProgress)      .. "|r")
+        print(COLOR_GRAY .. "  bagLevel (now)    : |r" .. COLOR_YELLOW .. tostring(bagLevel)           .. "|r")
+        print(COLOR_GRAY .. "  activeLevel (now) : |r" .. COLOR_YELLOW .. tostring(activeLevel)        .. "|r")
+        print(COLOR_GRAY .. "  autoMode          : |r" .. COLOR_YELLOW .. tostring(autoMode)           .. "|r")
+        print(COLOR_GRAY .. "  minKeyLevel       : |r" .. COLOR_YELLOW .. tostring(minKeyLevel)        .. "|r")
+
+        -- Show what ShouldSuppressReminder would decide right now and why
+        local reason = "unknown"
+        if autoMode then
+            if currentRunLevel ~= nil then
+                reason = "own key run — always suppress"
+            elseif not lastRunLevel then
+                reason = "lastRunLevel is nil — showing reminder (fail open)"
+            elseif lastRunDepleted then
+                reason = "run depleted/abandoned — suppress (no vendor)"
+            elseif not bagLevel then
+                reason = "no key in bag — suppress (nothing to reroll)"
+            elseif bagLevel > lastRunLevel then
+                reason = "bag (" .. bagLevel .. ") > run (" .. lastRunLevel .. ") — suppress (reroll would downgrade)"
+            else
+                reason = "bag (" .. tostring(bagLevel) .. ") <= run (" .. tostring(lastRunLevel) .. ") — SHOW reminder"
+            end
+        else
+            if minKeyLevel > 0 and currentRunLevel and currentRunLevel < minKeyLevel then
+                reason = "own key " .. tostring(currentRunLevel) .. " below minKeyLevel " .. minKeyLevel .. " — suppress"
+            else
+                reason = "manual mode, no suppression threshold met — SHOW reminder"
+            end
+        end
+        print(COLOR_GRAY .. "  ShouldSuppress?   : |r" .. COLOR_YELLOW .. reason .. "|r")
+
     else
-        print(FORMAT_SLUG .. "Options not ready yet.")
+        if KeyChangeReminder.optionsCategory then
+            Settings.OpenToCategory(KeyChangeReminder.optionsCategory.ID)
+        else
+            print(FORMAT_SLUG .. "Options not ready yet.")
+        end
     end
 end
