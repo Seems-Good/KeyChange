@@ -276,9 +276,11 @@ local function ShouldSuppressReminder()
         if currentRunLevel ~= nil then return true end
 
         -- ── No key was socketed (plain Mythic, or API returned nothing) ───────
-        -- lastRunLevel nil means we have no information about a keystone being
-        -- involved. Suppress to avoid a false reminder.
-        if not lastRunLevel then return true end
+        -- If lastRunLevel is still nil after retrying, we couldn't determine the
+        -- run level. Default to SHOWING the reminder — fail open rather than
+        -- silently suppressing a valid reminder. Plain Mythic (no keystone) does
+        -- not fire CHALLENGE_MODE_START so we will never reach this point for it.
+        if not lastRunLevel then return false end
 
         -- ── Depleted or abandoned ─────────────────────────────────────────────
         -- The reroll vendor only appears after a TIMED completion. A depleted or
@@ -356,22 +358,25 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         else
             -- Foreign key: currentRunLevel stays nil to signal "not our key".
             -- lastRunLevel must reflect the SOCKETED key level (the other person's
-            -- key), not our bag — so Auto mode can compare our bag against the
-            -- actual run level. GetActiveKeystoneLevel() reads the socketed key
-            -- which is available at CHALLENGE_MODE_START.
+            -- key). Try immediately; if Midnight hasn't populated it yet, retry
+            -- once inside the 5s grace window timer below.
             currentRunLevel = nil
             lastRunLevel = GetActiveKeystoneLevel()
-            -- Midnight fallback: if GetActiveKeystoneInfo is unreliable and returns
-            -- nil, lastRunLevel will be nil. ShouldSuppressReminder treats a nil
-            -- lastRunLevel as "no data — show the reminder" to avoid silently
-            -- suppressing when we simply couldn't determine the run level.
         end
 
         runInProgress = false  -- block RESET during grace window
         -- Midnight fires CHALLENGE_MODE_RESET immediately after START when the key
         -- is consumed from the bag into the socket. Wait 5s before trusting a RESET
-        -- as a genuine mid-run depletion.
+        -- as a genuine mid-run depletion. Also use this window to retry the active
+        -- keystone level snapshot if the first attempt returned nil.
         C_Timer.After(5, function()
+            if currentRunLevel == nil and lastRunLevel == nil then
+                -- Foreign key and API wasn't ready at START — retry now.
+                -- The key is guaranteed to be socketed at this point.
+                lastRunLevel = GetActiveKeystoneLevel()
+                -- If still nil after retry, leave as nil. ShouldSuppressReminder
+                -- will default to SHOWING the reminder (fail open, not fail silent).
+            end
             runInProgress = true
         end)
 
