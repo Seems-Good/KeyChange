@@ -1,6 +1,5 @@
 -- KeyChangeReminderOptions.lua
--- Builds the addon settings panel (WoW Settings API, 10.0+)
--- Registered under AddOns → KeyChangeReminder in the game Options screen.
+-- Registered under AddOns KeyChangeReminder in the game Options screen.
 
 KeyChangeReminder = KeyChangeReminder or {}
 
@@ -190,6 +189,8 @@ local function BuildPanel(panel)
         end
     end)
     y = y - 46
+
+    -- ── Text Color ─────────────────────────────
     MakeHeader(content, "Text Color", y)
     y = y - 20
     MakeLine(content, y)
@@ -239,12 +240,38 @@ local function BuildPanel(panel)
         y, 16)
     y = y - 38
 
-    local minKeyLabel = MakeLabel(content,
+    -- Helper references so Auto button and slider can cross-update each other.
+    local minKeyLabel
+    local minKeySlider
+    local btnAuto
+
+    -- Applies the correct enabled/disabled visual state to the slider and Auto
+    -- button to reflect whether Auto mode is currently on.
+    local function RefreshAutoState()
+        local isAuto = KeyChangeReminder:Get("autoMode") or false
+        if isAuto then
+            -- Auto mode active: disable the manual slider
+            minKeySlider:SetEnabled(false)
+            minKeySlider:SetAlpha(0.4)
+            minKeyLabel:SetText("Auto")
+            btnAuto:SetText("Auto: On")
+        else
+            -- Manual mode: enable the slider and restore its label
+            minKeySlider:SetEnabled(true)
+            minKeySlider:SetAlpha(1.0)
+            local val = KeyChangeReminder:Get("minKeyLevel") or 0
+            minKeyLabel:SetText("Level: " .. val .. (val == 0 and " (Always remind)" or ""))
+            btnAuto:SetText("Auto: Off")
+        end
+    end
+
+    -- Slider row: full-width slider on the left, level label to the right
+    minKeyLabel = MakeLabel(content,
         "Level: " .. (KeyChangeReminder:Get("minKeyLevel") or 0) ..
         ((KeyChangeReminder:Get("minKeyLevel") or 0) == 0 and " (Always remind)" or ""),
         y, 300)
 
-    local minKeySlider = CreateFrame("Slider", "KeyChangeReminderMinKeySlider", content, "OptionsSliderTemplate")
+    minKeySlider = CreateFrame("Slider", "KeyChangeReminderMinKeySlider", content, "OptionsSliderTemplate")
     minKeySlider:SetPoint("TOPLEFT", 16, y - 8)
     minKeySlider:SetSize(270, 16)
     minKeySlider:SetMinMaxValues(0, 30)
@@ -255,12 +282,35 @@ local function BuildPanel(panel)
     _G[minKeySlider:GetName() .. "High"]:SetText("30")
     _G[minKeySlider:GetName() .. "Text"]:SetText("")
     minKeySlider:SetScript("OnValueChanged", function(self, val)
+        -- Ignore slider events while Auto mode is active (slider is disabled
+        -- but WoW may still fire OnValueChanged on initialisation).
+        if KeyChangeReminder:Get("autoMode") then return end
         val = math.floor(val)
         KeyChangeReminder:Set("minKeyLevel", val)
         minKeyLabel:SetText("Level: " .. val .. (val == 0 and " (Always remind)" or ""))
     end)
 
-    y = y - 44
+    y = y - 32
+
+    -- Auto button: own row below the slider so it doesn't overlap the label.
+    -- Toggles autoMode on/off and updates the slider's enabled state accordingly.
+    btnAuto = MakeButton(content, "Auto: Off", 110, y, 16)
+    btnAuto:SetScript("OnClick", function()
+        local nowAuto = not (KeyChangeReminder:Get("autoMode") or false)
+        KeyChangeReminder:Set("autoMode", nowAuto)
+        -- When switching back to manual, clear any stale minKeyLevel suppression
+        -- so the slider value is the single source of truth again.
+        if not nowAuto then
+            KeyChangeReminder:Set("minKeyLevel", math.floor(minKeySlider:GetValue()))
+        end
+        RefreshAutoState()
+    end)
+
+    -- Apply initial visual state (handles the case where autoMode was saved true
+    -- from a previous session).
+    RefreshAutoState()
+
+    y = y - 32
 
     -- ── Talent Reminder ────────────────────────
     MakeHeader(content, "Talent Reminder", y)
@@ -301,7 +351,7 @@ local function BuildPanel(panel)
 
     local btnPrintKey = MakeButton(content, "Print Key Info", 190, y, 220)
     btnPrintKey:SetScript("OnClick", function()
-        print("|cff00ccff[KeyChangeReminder]-v1.0.7|r ── Key Info Debug ──")
+        print("|cff00ccff[KeyChangeReminder]|r ── Key Info Debug ──")
 
         -- Helper to safely dump a table one level deep
         local function dumpVal(v)

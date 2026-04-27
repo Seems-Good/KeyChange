@@ -17,6 +17,13 @@ local FORMAT_SLUG  = COLOR_BLUE .. "[KeyChangeReminder]|r" .. COLOR_GRAY .. "-("
 
 -- Tracks whether a run is currently in progress
 local runInProgress = false
+
+-- Level of the key that started the run, used for minKeyLevel and Auto mode.
+-- Set for ALL runs (own key or foreign key) so Auto mode can compare bag vs run level.
+local lastRunLevel = nil
+
+-- Level of OUR key at run start — only set when the active key is ours.
+-- Used by the existing minKeyLevel check (non-Auto path).
 local currentRunLevel = nil
 
 -- Guards against stale C_Timer.After callbacks firing after a new run has started
@@ -201,7 +208,7 @@ end
 -- Keystone helpers
 -- ──────────────────────────────────────────────
 
--- Level of the currently active key (inside dungeon)
+-- Level of the currently active key (inside dungeon).
 -- GetActiveKeystoneInfo returns an empty table for level in Midnight — not reliable.
 -- We snapshot from the bag before the run starts instead.
 local function GetActiveKeystoneLevel()
@@ -234,6 +241,48 @@ local function GetBagKeystoneLevel()
 end
 
 -- ──────────────────────────────────────────────
+-- Reminder gating logic
+-- ──────────────────────────────────────────────
+
+-- Returns true if the reminder should be suppressed based on the current
+-- minKeyLevel / Auto settings. Called from both COMPLETED and RESET timers.
+--
+-- Auto mode:  suppress when our bag key is strictly lower than the key that
+--             was just run. This handles the "we ran someone else's key and
+--             ours is too low to be worth changing" case. When it IS our own
+--             key the bag level will always equal or exceed lastRunLevel after
+--             a timed run (it goes up), so Auto never suppresses own-key
+--             completions. For depletes of our own key, lastRunLevel == the
+--             pre-run level and the bag key will be lower, which WOULD suppress
+--             — but depletes arrive via CHALLENGE_MODE_RESET where currentRunLevel
+--             is non-nil (own key), so we fall through to the minKeyLevel path
+--             instead of the Auto path, leaving depletion reminders unaffected.
+--
+-- minKeyLevel mode (manual): suppress when currentRunLevel (own-key snapshot)
+--             is below the configured threshold. Foreign-key runs have
+--             currentRunLevel == nil and are never suppressed by this path.
+local function ShouldSuppressReminder()
+    local autoMode = KeyChangeReminder:Get("autoMode")
+
+    if autoMode then
+        -- Auto: compare our current bag key against the level of the run that
+        -- just finished. If we have no key, or our key is lower than the run
+        -- level, there is nothing actionable to change to — suppress.
+        local bagLevel = GetBagKeystoneLevel()
+        if not bagLevel then return true end              -- no key in bag
+        if lastRunLevel and bagLevel < lastRunLevel then return true end
+        return false
+    else
+        -- Manual threshold: only applies to our own key runs.
+        local minLevel = KeyChangeReminder:Get("minKeyLevel") or 0
+        if minLevel > 0 and currentRunLevel and currentRunLevel < minLevel then
+            return true
+        end
+        return false
+    end
+end
+
+-- ──────────────────────────────────────────────
 -- Events
 -- ──────────────────────────────────────────────
 
@@ -261,7 +310,14 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         DismissReminder()
         -- Also dismiss the talent reminder; the run has begun
         DismissTalentReminder()
-        -- Determine if this is our key or someone else's
+
+        -- Snapshot the bag key level for ALL runs (own or foreign).
+        -- Auto mode needs this to compare bag level after the run completes.
+        lastRunLevel = GetBagKeystoneLevel()
+
+        -- Determine if this is our key or someone else's.
+        -- currentRunLevel is only set for own-key runs; used by the manual
+        -- minKeyLevel path and to distinguish own-key depletes in RESET.
         local ownedMapID = nil
         if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneChallengeMapID then
             ownedMapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
@@ -272,10 +328,11 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         end
         if ownedMapID and activeMapID and type(ownedMapID) == "number"
            and type(activeMapID) == "number" and ownedMapID == activeMapID then
-            currentRunLevel = GetBagKeystoneLevel()
+            currentRunLevel = lastRunLevel   -- own key: use the same snapshot
         else
-            currentRunLevel = nil
+            currentRunLevel = nil            -- foreign key
         end
+
         runInProgress = false  -- block RESET during grace window
         -- Midnight fires CHALLENGE_MODE_RESET immediately after START when the key
         -- is consumed from the bag into the socket. Wait 5s before trusting a RESET
@@ -289,13 +346,14 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         pendingReminderCancelled = false
         C_Timer.After(3, function()
             if pendingReminderCancelled then return end
-            local minLevel = KeyChangeReminder:Get("minKeyLevel") or 0
-            if minLevel > 0 and currentRunLevel and currentRunLevel < minLevel then
+            if ShouldSuppressReminder() then
                 currentRunLevel = nil
+                lastRunLevel = nil
                 return
             end
             KeyChangeReminder:ShowReminder("Change your key!")
             currentRunLevel = nil
+            lastRunLevel = nil
         end)
 
     elseif event == "CHALLENGE_MODE_RESET" then
@@ -306,8 +364,14 @@ frame:SetScript("OnEvent", function(self, event, arg1)
             pendingReminderCancelled = false
             C_Timer.After(2, function()
                 if pendingReminderCancelled then return end
+                if ShouldSuppressReminder() then
+                    currentRunLevel = nil
+                    lastRunLevel = nil
+                    return
+                end
                 KeyChangeReminder:ShowReminder("Change your key!")
                 currentRunLevel = nil
+                lastRunLevel = nil
             end)
         end
 
@@ -361,7 +425,6 @@ end)
 
 SLASH_KEYCHANGE1 = "/keychange"
 SLASH_KEYCHANGE2 = "/kcr"
-
 
 SlashCmdList["KEYCHANGE"] = function()
     if KeyChangeReminder.optionsCategory then
