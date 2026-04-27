@@ -22,7 +22,6 @@ You can fully customize how the message looks and behaves using the settings pan
 - `/kcr` - Options/Settings Menu 
 
 ### Features & Settings
-- Position
 - Show Warning / Hide Warning: Toggle the reminder display on or off.
 - Drag to Reposition: Allows you to move the message anywhere on your screen.
 - Reset Position: Returns the message to its default location.
@@ -34,3 +33,4 @@ You can fully customize how the message looks and behaves using the settings pan
 - Minimum Key Level Sets the minimum Mythic+ key level required for the reminder to appear. Example:
 - Set to 0 → Always show the reminder.
 - Set to 10 → Only show for +10 keys and higher.
+- (NEW!) Auto Mode - "only remind me if the key in my bag is at least as high as the key that was just run" - Auto is a replacement for the manual min-level slider that
