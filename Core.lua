@@ -5,9 +5,22 @@ KeyChangeReminder = KeyChangeReminder or {}
 
 local frame = CreateFrame("Frame", "KeyChangeReminderFrame", UIParent)
 
+local VERSION = "@project-version@"
+local TIMESTAMP = "@project-date-iso@"
+
+-- COLOR CODES (Used to color text)
+local COLOR_YELLOW = "|cffffff00"
+local COLOR_GRAY   = "|cff808080"
+local COLOR_BLUE   = "|cff00ccff"
+local FORMAT_NAME  = COLOR_BLUE .. "KeyChangeReminder[ KCR ]|r" .. COLOR_GRAY .. "-(" .. VERSION .. ")|r"
+local FORMAT_SLUG  = COLOR_BLUE .. "[KeyChangeReminder]|r" .. COLOR_GRAY .. "-(" .. VERSION .. ")|r"
+
 -- Tracks whether a run is currently in progress
 local runInProgress = false
 local currentRunLevel = nil
+
+-- Guards against stale C_Timer.After callbacks firing after a new run has started
+local pendingReminderCancelled = false
 
 -- ──────────────────────────────────────────────
 -- Reminder display
@@ -154,7 +167,7 @@ function KeyChangeReminder:ShowReminder(msg)
     reminderWatching = true
     frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 
-    print(string.format("|cff00ccff[KeyChangeReminder]|r %s", msg))
+    print(string.format(FORMAT_SLUG .. "%s", msg))
 end
 
 function KeyChangeReminder:HideReminder()
@@ -235,11 +248,16 @@ frame:SetScript("OnEvent", function(self, event, arg1)
 
     if event == "ADDON_LOADED" and arg1 == "KeyChangeReminder" then
         KeyChangeReminder:InitDB()
-        print("|cff00ccff[KeyChangeReminder]-v1.0.7|r Loaded. Type |cffffd700/keychange|r for options.")
+        print(FORMAT_SLUG .. "Type |cffffd700/keychange|r for options.")
         self:UnregisterEvent("ADDON_LOADED")  -- no longer needed after this point
 
     elseif event == "CHALLENGE_MODE_START" then
-        -- A new run is starting — any pending "change your key" reminder is stale
+        -- Cancel any pending "change your key" reminder from the previous run.
+        -- C_Timer.After callbacks cannot be cancelled natively, so we use a flag.
+        -- This prevents a stale timer (from COMPLETED or RESET) firing once we're
+        -- already inside the next dungeon.
+        pendingReminderCancelled = true
+        -- A new run is starting — dismiss any reminder currently on screen
         DismissReminder()
         -- Also dismiss the talent reminder; the run has begun
         DismissTalentReminder()
@@ -268,7 +286,9 @@ frame:SetScript("OnEvent", function(self, event, arg1)
 
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         runInProgress = false
+        pendingReminderCancelled = false
         C_Timer.After(3, function()
+            if pendingReminderCancelled then return end
             local minLevel = KeyChangeReminder:Get("minKeyLevel") or 0
             if minLevel > 0 and currentRunLevel and currentRunLevel < minLevel then
                 currentRunLevel = nil
@@ -283,17 +303,30 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         -- of a run AND when it depletes. Only remind if a run was actually in progress.
         if runInProgress then
             runInProgress = false
+            pendingReminderCancelled = false
             C_Timer.After(2, function()
+                if pendingReminderCancelled then return end
                 KeyChangeReminder:ShowReminder("Change your key!")
                 currentRunLevel = nil
             end)
         end
+
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- Entered combat — hide any visible reminder so it doesn't clutter the screen mid-pull
         DismissReminder()
         DismissTalentReminder()
 
     elseif event == "PLAYER_ENTERING_WORLD" then
+        -- If a "change your key" reminder is showing and the player zones into an
+        -- instance (e.g. walks back into a completed dungeon), dismiss it immediately.
+        -- The reminder is only actionable at the keystone table in the outside world.
+        if reminderWatching then
+            local inInstance, instanceType = IsInInstance()
+            if inInstance and instanceType == "party" then
+                DismissReminder()
+            end
+        end
+
         -- Show talent reminder when entering a M+ dungeon.
         -- Delay slightly to let the instance type settle after zone-in.
         if KeyChangeReminder:Get("talentReminder") then
@@ -334,6 +367,6 @@ SlashCmdList["KEYCHANGE"] = function()
     if KeyChangeReminder.optionsCategory then
         Settings.OpenToCategory(KeyChangeReminder.optionsCategory.ID)
     else
-        print("|cff00ccff[KeyChangeReminder]|r Options not ready yet.")
+        print(FORMAT_SLUG .. "Options not ready yet.")
     end
 end
