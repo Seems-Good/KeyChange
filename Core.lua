@@ -265,12 +265,18 @@ local function ShouldSuppressReminder()
     local autoMode = KeyChangeReminder:Get("autoMode")
 
     if autoMode then
-        -- Auto: compare our current bag key against the level of the run that
-        -- just finished. If we have no key, or our key is lower than the run
-        -- level, there is nothing actionable to change to — suppress.
+        -- Auto mode only applies to foreign-key runs. After completing your own
+        -- key it upgrades automatically in your bag — the reroll vendor does not
+        -- appear for own-key completions, so there is nothing to remind about.
+        if currentRunLevel ~= nil then return true end   -- own key: always suppress
+
+        -- Foreign key: only remind if our bag key is at or below the run level,
+        -- meaning we could actually benefit from a reroll at the vendor.
+        -- If our key is already higher than what we just ran, suppressing is correct
+        -- because rerolling would be a downgrade.
         local bagLevel = GetBagKeystoneLevel()
         if not bagLevel then return true end              -- no key in bag
-        if lastRunLevel and bagLevel < lastRunLevel then return true end
+        if lastRunLevel and bagLevel > lastRunLevel then return true end
         return false
     else
         -- Manual threshold: only applies to our own key runs.
