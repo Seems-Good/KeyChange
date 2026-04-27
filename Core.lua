@@ -29,6 +29,11 @@ local currentRunLevel = nil
 -- Guards against stale C_Timer.After callbacks firing after a new run has started
 local pendingReminderCancelled = false
 
+-- True when the run ended via RESET (depletion or abandon) rather than a clean
+-- COMPLETED. Used by Auto mode to adjust the effective run level downward by 1,
+-- since a depleted/abandoned key drops one level before the vendor appears.
+local lastRunDepleted = false
+
 -- ──────────────────────────────────────────────
 -- Reminder display
 -- ──────────────────────────────────────────────
@@ -265,21 +270,35 @@ local function ShouldSuppressReminder()
     local autoMode = KeyChangeReminder:Get("autoMode")
 
     if autoMode then
-        -- Auto mode only applies to foreign-key runs. After completing your own
-        -- key it upgrades automatically in your bag — the reroll vendor does not
-        -- appear for own-key completions, so there is nothing to remind about.
-        if currentRunLevel ~= nil then return true end   -- own key: always suppress
+        -- ── Own key ───────────────────────────────────────────────────────────
+        -- Your key auto-upgrades/downgrades in your bag; the reroll vendor never
+        -- appears for own-key runs. Always suppress.
+        if currentRunLevel ~= nil then return true end
 
-        -- Foreign key: only remind if our bag key is at or below the run level,
-        -- meaning we could actually benefit from a reroll at the vendor.
-        -- If our key is already higher than what we just ran, suppressing is correct
-        -- because rerolling would be a downgrade.
+        -- ── No key was socketed (plain Mythic, or API returned nothing) ───────
+        -- lastRunLevel nil means we have no information about a keystone being
+        -- involved. Suppress to avoid a false reminder.
+        if not lastRunLevel then return true end
+
+        -- ── Depleted or abandoned ─────────────────────────────────────────────
+        -- The reroll vendor only appears after a TIMED completion. A depleted or
+        -- abandoned run means the timer was not beaten — no vendor appears for
+        -- anyone regardless of key levels. Always suppress.
+        if lastRunDepleted then return true end
+
+        -- ── Foreign key ───────────────────────────────────────────────────────
+        -- Vendor appears after a timed foreign-key run when the player's bag key
+        -- is ≤ the socketed key level. Suppress only when bag key is strictly
+        -- higher — rerolling would be a downgrade.
         local bagLevel = GetBagKeystoneLevel()
-        if not bagLevel then return true end              -- no key in bag
-        if lastRunLevel and bagLevel > lastRunLevel then return true end
+        if not bagLevel then return true end       -- no key in bag, nothing to reroll
+        if bagLevel > lastRunLevel then return true end
         return false
+
     else
-        -- Manual threshold: only applies to our own key runs.
+        -- ── Manual threshold ─────────────────────────────────────────────────
+        -- Only gates own-key runs against the configured minimum level.
+        -- Foreign-key runs (currentRunLevel == nil) are never suppressed here.
         local minLevel = KeyChangeReminder:Get("minKeyLevel") or 0
         if minLevel > 0 and currentRunLevel and currentRunLevel < minLevel then
             return true
@@ -312,18 +331,15 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         -- This prevents a stale timer (from COMPLETED or RESET) firing once we're
         -- already inside the next dungeon.
         pendingReminderCancelled = true
+        lastRunDepleted = false
         -- A new run is starting — dismiss any reminder currently on screen
         DismissReminder()
         -- Also dismiss the talent reminder; the run has begun
         DismissTalentReminder()
 
-        -- Snapshot the bag key level for ALL runs (own or foreign).
-        -- Auto mode needs this to compare bag level after the run completes.
-        lastRunLevel = GetBagKeystoneLevel()
-
         -- Determine if this is our key or someone else's.
         -- currentRunLevel is only set for own-key runs; used by the manual
-        -- minKeyLevel path and to distinguish own-key depletes in RESET.
+        -- minKeyLevel path and to distinguish own-key runs in Auto mode.
         local ownedMapID = nil
         if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneChallengeMapID then
             ownedMapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
@@ -334,9 +350,21 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         end
         if ownedMapID and activeMapID and type(ownedMapID) == "number"
            and type(activeMapID) == "number" and ownedMapID == activeMapID then
-            currentRunLevel = lastRunLevel   -- own key: use the same snapshot
+            -- Our own key: snapshot from bag (reliable for own key).
+            currentRunLevel = GetBagKeystoneLevel()
+            lastRunLevel = currentRunLevel
         else
-            currentRunLevel = nil            -- foreign key
+            -- Foreign key: currentRunLevel stays nil to signal "not our key".
+            -- lastRunLevel must reflect the SOCKETED key level (the other person's
+            -- key), not our bag — so Auto mode can compare our bag against the
+            -- actual run level. GetActiveKeystoneLevel() reads the socketed key
+            -- which is available at CHALLENGE_MODE_START.
+            currentRunLevel = nil
+            lastRunLevel = GetActiveKeystoneLevel()
+            -- Midnight fallback: if GetActiveKeystoneInfo is unreliable and returns
+            -- nil, lastRunLevel will be nil. ShouldSuppressReminder treats a nil
+            -- lastRunLevel as "no data — show the reminder" to avoid silently
+            -- suppressing when we simply couldn't determine the run level.
         end
 
         runInProgress = false  -- block RESET during grace window
@@ -350,16 +378,19 @@ frame:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         runInProgress = false
         pendingReminderCancelled = false
+        lastRunDepleted = false   -- clean completion, key level unchanged or went up
         C_Timer.After(3, function()
             if pendingReminderCancelled then return end
             if ShouldSuppressReminder() then
                 currentRunLevel = nil
                 lastRunLevel = nil
+                lastRunDepleted = false
                 return
             end
             KeyChangeReminder:ShowReminder("Change your key!")
             currentRunLevel = nil
             lastRunLevel = nil
+            lastRunDepleted = false
         end)
 
     elseif event == "CHALLENGE_MODE_RESET" then
@@ -368,16 +399,19 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         if runInProgress then
             runInProgress = false
             pendingReminderCancelled = false
+            lastRunDepleted = true   -- depletion or abandon: key dropped by 1
             C_Timer.After(2, function()
                 if pendingReminderCancelled then return end
                 if ShouldSuppressReminder() then
                     currentRunLevel = nil
                     lastRunLevel = nil
+                    lastRunDepleted = false
                     return
                 end
                 KeyChangeReminder:ShowReminder("Change your key!")
                 currentRunLevel = nil
                 lastRunLevel = nil
+                lastRunDepleted = false
             end)
         end
 
