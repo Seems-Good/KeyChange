@@ -16,7 +16,6 @@ The message stays on your screen throughout the post-dungeon phase. Once you exi
 
 You can fully customize how the message looks and behaves using the settings panel.
 
-
 ### Commands: 
 
 - `/kcr` - Options/Settings Menu 
