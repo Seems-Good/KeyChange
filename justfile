@@ -111,6 +111,30 @@ ls-classic:
 ls target:
   ls -larth "{{ if target == "beta" { beta_path } else if target == "classic" { classic_path } else { retail_path } }}/{{ addon_name }}"
 
+# cd beta dir 
+cd-beta:
+  @just cd beta
+
+# cd retail dir
+cd-retail:
+  @just cd retail
+
+# cd classic dir
+cd-classic:
+  @just cd classic
+
+# cd _path (prints pwd helper to get back)
+cd target:
+  vim "{{ if target == "beta" { beta_path } else if target == "classic" { classic_path } else { retail_path } }}/{{ addon_name }}"
+
+# git commit for single file changes
+# example: just commit someFileName "some message here" 
+commit file comment:
+    git add "{{file}}" && git commit -m "{{comment}}"
+
+
+
+
 # git ci for bigwigs/packager (gh action)
 # example: just build 1.0.0 "some message here"
 build tag message:

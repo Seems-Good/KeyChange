@@ -1,10 +1,65 @@
--- KeyChangeReminderOptions.lua
--- Registered under AddOns KeyChangeReminder in the game Options screen.
+-- KeyChangeReminderSettings.lua
+-- Default settings, SavedVariables helpers, and the Settings panel UI.
+-- (Merged from Config.lua + Options.lua)
 
 KeyChangeReminder = KeyChangeReminder or {}
 
 -- ──────────────────────────────────────────────
--- Helpers
+-- Default settings & DB helpers
+-- ──────────────────────────────────────────────
+
+local DEFAULTS = {
+    enabled        = true,
+    minKeyLevel    = 0,          -- 0 = always remind regardless of key level
+    autoMode       = false,      -- Auto mode off by default
+    color          = "CYAN",     -- preset name
+    anchorPoint    = "CENTER",   -- WoW anchor point
+    anchorX        = 0,
+    anchorY        = 200,
+    fontSize       = 42,
+    pulseSpeed     = 1.0,        -- seconds per half-cycle (0.3 = fast, 2.0 = slow)
+    talentReminder = false,      -- off by default
+}
+
+-- Color presets (label -> hex AARRGGBB)
+KeyChangeReminder.COLOR_PRESETS = {
+    RED    = "ffff3333",
+    ORANGE = "ffff9900",
+    YELLOW = "ffffff00",
+    WHITE  = "ffffffff",
+    CYAN   = "ff00ccff",
+    GREEN  = "ff00ff88",
+}
+
+function KeyChangeReminder:InitDB()
+    if not KeyChangeReminderDB then
+        KeyChangeReminderDB = {}
+    end
+    for k, v in pairs(DEFAULTS) do
+        if KeyChangeReminderDB[k] == nil then
+            KeyChangeReminderDB[k] = v
+        end
+    end
+    self.db = KeyChangeReminderDB
+end
+
+function KeyChangeReminder:Get(key)
+    return self.db and self.db[key]
+end
+
+function KeyChangeReminder:Set(key, value)
+    if self.db then
+        self.db[key] = value
+    end
+end
+
+function KeyChangeReminder:GetColorHex()
+    local preset = self:Get("color") or "CYAN"
+    return KeyChangeReminder.COLOR_PRESETS[preset] or KeyChangeReminder.COLOR_PRESETS["CYAN"]
+end
+
+-- ──────────────────────────────────────────────
+-- Settings panel UI helpers
 -- ──────────────────────────────────────────────
 
 local function MakeHeader(parent, text, yOffset)
@@ -30,7 +85,6 @@ local function MakeLabel(parent, text, yOffset, xOffset)
     return f
 end
 
--- Standard styled button matching the screenshot
 local function MakeButton(parent, label, width, yOffset, xOffset)
     local btn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
     btn:SetSize(width or 160, 26)
@@ -44,11 +98,8 @@ end
 -- ──────────────────────────────────────────────
 
 local function BuildPanel(panel)
-    -- Wrap everything in a scroll frame so the panel doesn't overflow.
-    -- Content width is hardcoded because the panel has no size yet at build time
-    -- (the Settings system sizes it later).
     local scrollFrame = CreateFrame("ScrollFrame", "KeyChangeReminderScrollFrame", panel, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+    scrollFrame:SetPoint("TOPLEFT",     panel, "TOPLEFT",     0,   0)
     scrollFrame:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 0)
 
     local content = CreateFrame("Frame", nil, scrollFrame)
@@ -57,7 +108,7 @@ local function BuildPanel(panel)
 
     local y = -10  -- running Y cursor (negative = downward)
 
-    -- ── Position ──────────────────────────────
+    -- ── Position ──────────────────────────────────────────────────────────
     MakeHeader(content, "Position", y)
     y = y - 26
     MakeLine(content, y)
@@ -75,7 +126,6 @@ local function BuildPanel(panel)
 
     y = y - 34
 
-    -- Drag-to-reposition toggle
     local dragging = false
     local btnDrag = MakeButton(content, "Drag to Reposition", 190, y, 16)
     btnDrag:SetScript("OnClick", function()
@@ -91,7 +141,6 @@ local function BuildPanel(panel)
             lbl:SetScript("OnDragStart", function(self) self:StartMoving() end)
             lbl:SetScript("OnDragStop", function(self)
                 self:StopMovingOrSizing()
-                -- Save position relative to UIParent CENTER
                 local point, _, _, x, y2 = self:GetPoint()
                 KeyChangeReminder:Set("anchorPoint", point)
                 KeyChangeReminder:Set("anchorX", math.floor(x + 0.5))
@@ -121,7 +170,7 @@ local function BuildPanel(panel)
 
     y = y - 44
 
-    -- ── Font Size ──────────────────────────────
+    -- ── Font Size ─────────────────────────────────────────────────────────
     MakeHeader(content, "Font Size", y)
     y = y - 20
     MakeLine(content, y)
@@ -143,7 +192,6 @@ local function BuildPanel(panel)
         val = math.floor(val)
         KeyChangeReminder:Set("fontSize", val)
         sizeLabel:SetText(val .. "pt")
-        -- Live preview
         if KeyChangeReminderLabel and KeyChangeReminderLabel:IsShown() then
             KeyChangeReminderLabel.text:SetFont(STANDARD_TEXT_FONT, val, "OUTLINE")
         end
@@ -151,7 +199,7 @@ local function BuildPanel(panel)
 
     y = y - 44
 
-    -- ── Animation Speed ────────────────────────
+    -- ── Pulse Speed ───────────────────────────────────────────────────────
     MakeHeader(content, "Pulse Speed", y)
     y = y - 20
     MakeLine(content, y)
@@ -176,10 +224,9 @@ local function BuildPanel(panel)
     _G[pulseSlider:GetName() .. "High"]:SetText("Slow")
     _G[pulseSlider:GetName() .. "Text"]:SetText("")
     pulseSlider:SetScript("OnValueChanged", function(self, val)
-        val = math.floor(val * 10 + 0.5) / 10  -- round to 1 decimal
+        val = math.floor(val * 10 + 0.5) / 10
         KeyChangeReminder:Set("pulseSpeed", val)
         speedLabel:SetText(pulseLabel(val))
-        -- Live preview: update running animation if visible
         if KeyChangeReminderLabel and KeyChangeReminderLabel:IsShown() then
             local anims = { KeyChangeReminderLabel.pulseGroup:GetAnimations() }
             local half = val / 2
@@ -190,7 +237,7 @@ local function BuildPanel(panel)
     end)
     y = y - 46
 
-    -- ── Text Color ─────────────────────────────
+    -- ── Text Color ────────────────────────────────────────────────────────
     MakeHeader(content, "Text Color", y)
     y = y - 20
     MakeLine(content, y)
@@ -207,7 +254,7 @@ local function BuildPanel(panel)
 
     local BTN_W, BTN_H, GAP = 178, 26, 8
     for i, info in ipairs(COLOR_LAYOUT) do
-        local col = (i - 1) % 3          -- 0, 1, 2
+        local col = (i - 1) % 3
         local row = math.floor((i - 1) / 3)
         local bx = 16 + col * (BTN_W + GAP)
         local by = y - row * (BTN_H + GAP)
@@ -216,7 +263,6 @@ local function BuildPanel(panel)
         cb:GetFontString():SetTextColor(info.col[1], info.col[2], info.col[3])
         cb:SetScript("OnClick", function()
             KeyChangeReminder:Set("color", info.name)
-            -- Live preview
             if KeyChangeReminderLabel and KeyChangeReminderLabel:IsShown() then
                 local hex = KeyChangeReminder:GetColorHex()
                 local r = tonumber(hex:sub(3,4), 16) / 255
@@ -229,7 +275,7 @@ local function BuildPanel(panel)
 
     y = y - 72
 
-    -- ── Minimum Key Level ──────────────────────
+    -- ── Minimum Key Level / Auto Mode ────────────────────────────────────
     MakeHeader(content, "Minimum Key Level", y)
     y = y - 26
     MakeLine(content, y)
@@ -240,23 +286,18 @@ local function BuildPanel(panel)
         y, 16)
     y = y - 38
 
-    -- Helper references so Auto button and slider can cross-update each other.
     local minKeyLabel
     local minKeySlider
     local btnAuto
 
-    -- Applies the correct enabled/disabled visual state to the slider and Auto
-    -- button to reflect whether Auto mode is currently on.
     local function RefreshAutoState()
         local isAuto = KeyChangeReminder:Get("autoMode") or false
         if isAuto then
-            -- Auto mode active: disable the manual slider
             minKeySlider:SetEnabled(false)
             minKeySlider:SetAlpha(0.4)
             minKeyLabel:SetText("Auto")
             btnAuto:SetText("Auto: On")
         else
-            -- Manual mode: enable the slider and restore its label
             minKeySlider:SetEnabled(true)
             minKeySlider:SetAlpha(1.0)
             local val = KeyChangeReminder:Get("minKeyLevel") or 0
@@ -265,7 +306,6 @@ local function BuildPanel(panel)
         end
     end
 
-    -- Slider row: full-width slider on the left, level label to the right
     minKeyLabel = MakeLabel(content,
         "Level: " .. (KeyChangeReminder:Get("minKeyLevel") or 0) ..
         ((KeyChangeReminder:Get("minKeyLevel") or 0) == 0 and " (Always remind)" or ""),
@@ -282,8 +322,6 @@ local function BuildPanel(panel)
     _G[minKeySlider:GetName() .. "High"]:SetText("30")
     _G[minKeySlider:GetName() .. "Text"]:SetText("")
     minKeySlider:SetScript("OnValueChanged", function(self, val)
-        -- Ignore slider events while Auto mode is active (slider is disabled
-        -- but WoW may still fire OnValueChanged on initialisation).
         if KeyChangeReminder:Get("autoMode") then return end
         val = math.floor(val)
         KeyChangeReminder:Set("minKeyLevel", val)
@@ -292,27 +330,34 @@ local function BuildPanel(panel)
 
     y = y - 32
 
-    -- Auto button: own row below the slider so it doesn't overlap the label.
-    -- Toggles autoMode on/off and updates the slider's enabled state accordingly.
     btnAuto = MakeButton(content, "Auto: Off", 110, y, 16)
     btnAuto:SetScript("OnClick", function()
         local nowAuto = not (KeyChangeReminder:Get("autoMode") or false)
         KeyChangeReminder:Set("autoMode", nowAuto)
-        -- When switching back to manual, clear any stale minKeyLevel suppression
-        -- so the slider value is the single source of truth again.
         if not nowAuto then
             KeyChangeReminder:Set("minKeyLevel", math.floor(minKeySlider:GetValue()))
         end
         RefreshAutoState()
     end)
 
-    -- Apply initial visual state (handles the case where autoMode was saved true
-    -- from a previous session).
+    -- Tooltip explaining what Auto mode does
+    btnAuto:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Auto Mode")
+        GameTooltip:AddLine(
+            "Only reminds you on foreign-key timed runs where the vendor " ..
+            "offers a worthwhile reroll (your bag key level is at or below the completed " ..
+            "key level). Own-key runs, depletions, and abandons are silenced.",
+            1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    btnAuto:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
     RefreshAutoState()
 
     y = y - 32
 
-    -- ── Talent Reminder ────────────────────────
+    -- ── Talent Reminder ───────────────────────────────────────────────────
     MakeHeader(content, "Talent Reminder", y)
     y = y - 26
     MakeLine(content, y)
@@ -329,7 +374,6 @@ local function BuildPanel(panel)
         local enabled = self:GetChecked()
         KeyChangeReminder:Set("talentReminder", enabled)
         if enabled then
-            -- Already inside a dungeon when the user turns this on — show immediately
             KeyChangeReminder:CheckAndShowTalentReminder()
         else
             KeyChangeReminder:HideTalentReminder()
@@ -338,7 +382,7 @@ local function BuildPanel(panel)
 
     y = y - 34
 
-    -- ── Debug ──────────────────────────────────
+    -- ── Debug ─────────────────────────────────────────────────────────────
     MakeHeader(content, "Debug", y)
     y = y - 26
     MakeLine(content, y)
@@ -353,7 +397,6 @@ local function BuildPanel(panel)
     btnPrintKey:SetScript("OnClick", function()
         print("|cff00ccff[KeyChangeReminder]|r ── Key Info Debug ──")
 
-        -- Helper to safely dump a table one level deep
         local function dumpVal(v)
             if type(v) == "table" then
                 local parts = {}
@@ -365,7 +408,6 @@ local function BuildPanel(panel)
             return tostring(v)
         end
 
-        -- C_ChallengeMode.GetActiveKeystoneInfo
         if C_ChallengeMode and C_ChallengeMode.GetActiveKeystoneInfo then
             local a, b, c = C_ChallengeMode.GetActiveKeystoneInfo()
             print("  GetActiveKeystoneInfo: " .. dumpVal(a) .. " | " .. dumpVal(b) .. " | " .. dumpVal(c))
@@ -373,15 +415,13 @@ local function BuildPanel(panel)
             print("  GetActiveKeystoneInfo: NOT AVAILABLE")
         end
 
-        -- C_MythicPlus.GetOwnedKeystoneChallengeMapID
         if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneChallengeMapID then
-            local a, b = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
-            print("  GetOwnedKeystoneChallengeMapID: " .. dumpVal(a) .. " | " .. dumpVal(b))
+            local a = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
+            print("  GetOwnedKeystoneChallengeMapID: " .. dumpVal(a))
         else
             print("  GetOwnedKeystoneChallengeMapID: NOT AVAILABLE")
         end
 
-        -- C_MythicPlus.GetOwnedKeystoneLevel (TWW+)
         if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneLevel then
             local lvl = C_MythicPlus.GetOwnedKeystoneLevel()
             print("  GetOwnedKeystoneLevel: " .. dumpVal(lvl))
@@ -389,10 +429,9 @@ local function BuildPanel(panel)
             print("  GetOwnedKeystoneLevel: NOT AVAILABLE")
         end
 
-        -- C_MythicPlus.GetOwnedKeystoneMapID (alternate name seen in some builds)
         if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneMapID then
-            local a, b = C_MythicPlus.GetOwnedKeystoneMapID()
-            print("  GetOwnedKeystoneMapID: " .. dumpVal(a) .. " | " .. dumpVal(b))
+            local a = C_MythicPlus.GetOwnedKeystoneMapID()
+            print("  GetOwnedKeystoneMapID: " .. dumpVal(a))
         else
             print("  GetOwnedKeystoneMapID: NOT AVAILABLE")
         end
@@ -400,7 +439,6 @@ local function BuildPanel(panel)
         print("|cff00ccff[KeyChangeReminder]|r ────────────────────")
     end)
 
-    -- Trim content height to fit the actual layout
     content:SetHeight(math.abs(y) + 20)
 end
 
@@ -411,11 +449,10 @@ end
 local optFrame = CreateFrame("Frame")
 optFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == "KeyChangeReminder" then
-        -- Give the DB a moment to initialise, then build the panel
         C_Timer.After(0, function()
             local panel = CreateFrame("Frame")
-            panel.name = "KeyChangeReminder"
-            panel:Hide()  -- must be hidden at start; Settings system shows/hides it as needed
+            panel.name  = "KeyChangeReminder"
+            panel:Hide()
 
             BuildPanel(panel)
 

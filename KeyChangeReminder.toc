@@ -10,6 +10,5 @@
 ## X-Website: https://github.com/Seems-Good/KeyChangeReminder
 ## X-Curse-Project-ID: 1498155 
 
-Config.lua
+Settings.lua
 Core.lua
-Options.lua
