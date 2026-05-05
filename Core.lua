@@ -1,5 +1,6 @@
 -- KeyChangeReminder.lua (Core.lua)
 -- Core logic: events, keystone detection, reminder display
+-- Target: Midnight 12.0.5+ — no backward-compat shims
 
 KeyChangeReminder = KeyChangeReminder or {}
 
@@ -8,7 +9,7 @@ local frame = CreateFrame("Frame", "KeyChangeReminderFrame", UIParent)
 local VERSION   = "@project-version@"
 local TIMESTAMP = "@project-date-iso@"
 
--- COLOR CODES (Used to color text)
+-- COLOR CODES
 local COLOR_YELLOW = "|cffffff00"
 local COLOR_GRAY   = "|cff808080"
 local COLOR_BLUE   = "|cff00ccff"
@@ -20,23 +21,22 @@ local FORMAT_SLUG  = COLOR_BLUE .. "[KeyChangeReminder]|r" .. COLOR_GRAY .. "-("
 -- ──────────────────────────────────────────────
 --
 -- States:
---   IDLE          No run in progress. Initial state and post-reset state.
---   STARTING      CHALLENGE_MODE_START fired; waiting 5 s grace window before
---                 trusting a RESET as genuine depletion (Midnight fires a
---                 spurious RESET when the key is consumed from the bag).
+--   IDLE          No run in progress.
+--   STARTING      CHALLENGE_MODE_START fired; 5-second grace window is active.
+--                 This window exists solely to eat Midnight's spurious
+--                 CHALLENGE_MODE_RESET that fires right after key consumption.
 --   IN_PROGRESS   Grace window elapsed; run is underway.
 --   COMPLETED     CHALLENGE_MODE_COMPLETED fired (timed finish).
 --   DEPLETED      CHALLENGE_MODE_RESET fired while IN_PROGRESS.
 --
 -- Transitions:
---   IDLE         → STARTING   on CHALLENGE_MODE_START
---   STARTING     → IN_PROGRESS  after 5 s timer
---   STARTING     → IDLE       on CHALLENGE_MODE_START (new run interrupted start)
---   IN_PROGRESS  → COMPLETED  on CHALLENGE_MODE_COMPLETED
---   IN_PROGRESS  → DEPLETED   on CHALLENGE_MODE_RESET
---   COMPLETED    → IDLE       after reminder timer fires (or is suppressed)
---   DEPLETED     → IDLE       after reminder timer fires (or is suppressed)
---   ANY          → IDLE       on CHALLENGE_MODE_START (stale-run guard)
+--   IDLE         → STARTING     on CHALLENGE_MODE_START
+--   STARTING     → IN_PROGRESS  after 5-second timer
+--   IN_PROGRESS  → COMPLETED    on CHALLENGE_MODE_COMPLETED
+--   IN_PROGRESS  → DEPLETED     on CHALLENGE_MODE_RESET
+--   COMPLETED    → IDLE         after reminder fires (or is suppressed)
+--   DEPLETED     → IDLE         immediately after state is recorded
+--   ANY          → IDLE         on next CHALLENGE_MODE_START (stale-run guard)
 
 local STATE_IDLE        = "IDLE"
 local STATE_STARTING    = "STARTING"
@@ -50,23 +50,15 @@ local runState = STATE_IDLE
 -- Run-level bookkeeping
 -- ──────────────────────────────────────────────
 
--- Level of the socketed key for the current/last run.
--- Set for ALL runs (own key or foreign key).
--- Used by AutoMode comparison (bag level vs run level).
+-- Level of the keystone socketed for this run. Set at START via
+-- C_ChallengeMode.GetSlottedKeystoneInfo(), which is reliable immediately.
 local lastRunLevel = nil
 
--- Level of OUR bag key at the moment CHALLENGE_MODE_START fired.
--- Only set when we determined the run used OUR key.
--- nil means "foreign key run" for this run.
-local currentRunLevel = nil
-
--- Whether the player owns the key that was socketed for this run.
--- Determined at CHALLENGE_MODE_START; see DetectKeyOwnership().
+-- true  = WE put our keystone in the socket (C_PartyInfo.IsChallengeModeKeystoneOwner)
+-- false = someone else's keystone is slotted
 local ownKeyRun = false
 
--- Guards against stale C_Timer.After callbacks firing after a new run has
--- started. Incremented on every CHALLENGE_MODE_START; callbacks capture the
--- value at creation time and bail if it has changed by the time they fire.
+-- Guards stale C_Timer.After callbacks.
 local runGeneration = 0
 
 -- ──────────────────────────────────────────────
@@ -76,19 +68,6 @@ local runGeneration = 0
 local reminderLabel          = nil
 local reminderWatching       = false
 local talentReminderWatching = false
-
-local function GetCurrentKeystoneState()
-    local mapID, level = nil, nil
-    if C_MythicPlus then
-        if C_MythicPlus.GetOwnedKeystoneChallengeMapID then
-            mapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
-        end
-        if C_MythicPlus.GetOwnedKeystoneLevel then
-            level = C_MythicPlus.GetOwnedKeystoneLevel()
-        end
-    end
-    return mapID, level
-end
 
 local function DismissReminder()
     if not reminderWatching then return end
@@ -219,7 +198,7 @@ end
 
 function KeyChangeReminder:ShowTalentReminder()
     self:ShowReminder("Switch to your M+ talents!")
-    reminderWatching      = false
+    reminderWatching       = false
     talentReminderWatching = true
     frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
 end
@@ -228,148 +207,132 @@ function KeyChangeReminder:HideTalentReminder()
     DismissTalentReminder()
 end
 
-function KeyChangeReminder:CheckAndShowTalentReminder()
-    local inInstance, instanceType = IsInInstance()
-    local level = C_MythicPlus and C_MythicPlus.GetOwnedKeystoneLevel
-        and C_MythicPlus.GetOwnedKeystoneLevel()
-    if inInstance and instanceType == "party"
-       and type(level) == "number" and level > 0 then
-        self:ShowTalentReminder()
-    end
+-- ──────────────────────────────────────────────
+-- Keystone API helpers (Midnight 12.0.5+)
+-- ──────────────────────────────────────────────
+
+-- Returns true when a Mythic+ run is currently active.
+-- Preferred over IsInInstance()+type checks for M+-specific gating.
+-- C_MythicPlus.IsMythicPlusActive() → isMythicPlusActive
+local function IsMythicPlusActive()
+    return C_MythicPlus and C_MythicPlus.IsMythicPlusActive and C_MythicPlus.IsMythicPlusActive() == true
 end
 
--- ──────────────────────────────────────────────
--- Keystone API helpers
--- ──────────────────────────────────────────────
-
--- Returns the level of the keystone currently socketed in the active challenge.
---
--- Midnight API notes:
---   C_ChallengeMode.GetActiveKeystoneInfo() → (mapID, keystoneLevel, affixes, wasEnergized)
---   keystoneLevel is always a plain number in live Midnight; guard for table just in case.
---   This function is ONLY reliable once the key is socketed (after START fires).
-local function GetActiveKeystoneLevel()
-    if C_ChallengeMode and C_ChallengeMode.GetActiveKeystoneInfo then
-        local _, level = C_ChallengeMode.GetActiveKeystoneInfo()
-        -- Defensive: handle if Blizzard ever wraps this in a table
-        if type(level) == "table" then
-            level = level.level or level[1] or level.keystoneLevel
-        end
-        if type(level) == "number" and level > 0 then return level end
+-- Returns the level of the keystone currently slotted in the font (nil if none).
+-- No direct C_MythicPlus equivalent exists for the slotted/active level, so
+-- C_ChallengeMode.GetSlottedKeystoneInfo() is still the correct call here.
+-- Returns: mapChallengeModeID, affixIDs, keystoneLevel
+local function GetSlottedKeystoneLevel()
+    if not (C_ChallengeMode and C_ChallengeMode.GetSlottedKeystoneInfo) then
+        return nil
     end
+    local _, _, level = C_ChallengeMode.GetSlottedKeystoneInfo()
+    if type(level) == "number" and level > 0 then return level end
     return nil
 end
 
--- Returns the map ID of the keystone currently socketed in the active challenge.
-local function GetActiveKeystoneMapID()
-    if C_ChallengeMode and C_ChallengeMode.GetActiveKeystoneInfo then
-        local mapID = C_ChallengeMode.GetActiveKeystoneInfo()
-        if type(mapID) == "number" and mapID > 0 then return mapID end
-    end
-    return nil
-end
-
--- Returns the level of the keystone currently in the player's bag.
---
--- Midnight confirmed: C_MythicPlus.GetOwnedKeystoneLevel() returns a plain
--- number when the player has a key, or nil when they do not.
--- After CHALLENGE_MODE_START the key is in the socket, NOT the bag, so this
--- returns nil for the duration of a run — which is exactly the signal we use
--- to confirm "your key was the one that got socketed".
+-- Returns the level of the keystone in OUR bag (nil if we have none).
+-- C_MythicPlus.GetOwnedKeystoneLevel() → keyStoneLevel
 local function GetBagKeystoneLevel()
-    if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneLevel then
-        local level = C_MythicPlus.GetOwnedKeystoneLevel()
-        if type(level) == "number" and level > 0 then return level end
+    if not (C_MythicPlus and C_MythicPlus.GetOwnedKeystoneLevel) then
+        return nil
     end
+    local level = C_MythicPlus.GetOwnedKeystoneLevel()
+    if type(level) == "number" and level > 0 then return level end
     return nil
 end
 
--- Returns the map ID of the keystone in the player's bag, or nil.
+-- Returns the challenge map ID of the keystone in OUR bag (nil if none).
+-- C_MythicPlus.GetOwnedKeystoneChallengeMapID() → challengeMapID
+local function GetBagKeystoneChallengeMapID()
+    if not (C_MythicPlus and C_MythicPlus.GetOwnedKeystoneChallengeMapID) then
+        return nil
+    end
+    local id = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
+    if type(id) == "number" and id > 0 then return id end
+    return nil
+end
+
+-- Returns the world map ID of the keystone in OUR bag (nil if none).
+-- Distinct from ChallengeMapID — used for map lookups.
+-- C_MythicPlus.GetOwnedKeystoneMapID() → mapID
 local function GetBagKeystoneMapID()
-    if C_MythicPlus and C_MythicPlus.GetOwnedKeystoneChallengeMapID then
-        local mapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
-        if type(mapID) == "number" and mapID > 0 then return mapID end
+    if not (C_MythicPlus and C_MythicPlus.GetOwnedKeystoneMapID) then
+        return nil
     end
+    local id = C_MythicPlus.GetOwnedKeystoneMapID()
+    if type(id) == "number" and id > 0 then return id end
     return nil
 end
 
--- ──────────────────────────────────────────────
--- Own-key detection
--- ──────────────────────────────────────────────
---
--- THE CORRECT WAY in Midnight:
---
--- At the moment CHALLENGE_MODE_START fires the key has just been consumed
--- from the player's bag into the socket. So:
---
---   • If it was YOUR key  → GetBagKeystoneLevel() returns nil (key is gone).
---   • If it was someone else's key → GetBagKeystoneLevel() returns your key's level.
---
--- This is reliable and doesn't depend on map-ID matching (which was the old
--- broken approach: same-dungeon foreign keys share the map ID with your key
--- and would incorrectly be classified as "own key" runs).
---
--- Returns: ownKey (bool), ownKeyLevel (number|nil), socketedLevel (number|nil)
-local function DetectKeyOwnership()
-    local bagLevelAfterStart = GetBagKeystoneLevel()
-
-    if bagLevelAfterStart == nil then
-        -- Your key was consumed — this is YOUR run.
-        -- We can't read your old bag level here because it's gone.
-        -- Instead, read it from the socket (GetActiveKeystoneLevel).
-        local socketedLevel = GetActiveKeystoneLevel()
-        return true, socketedLevel, socketedLevel
-    else
-        -- Your key is still in the bag — someone else's key was socketed.
-        -- bagLevelAfterStart = YOUR key level (unchanged, still in bag).
-        -- socketedLevel = the foreign key's level.
-        local socketedLevel = GetActiveKeystoneLevel()
-        return false, bagLevelAfterStart, socketedLevel
+-- Returns true if the LOCAL player is the keystone owner for the current run.
+-- C_PartyInfo.IsChallengeModeKeystoneOwner() → isKeystoneOwner
+-- Canonical API — no bag-presence heuristics needed.
+local function IsLocalPlayerKeystoneOwner()
+    if C_PartyInfo and C_PartyInfo.IsChallengeModeKeystoneOwner then
+        return C_PartyInfo.IsChallengeModeKeystoneOwner() == true
     end
+    -- Fallback: assume foreign key (fail safe = show reminder)
+    return false
 end
 
 -- ──────────────────────────────────────────────
 -- Reminder suppression logic
 -- ──────────────────────────────────────────────
 --
--- Returns true when the reminder should be suppressed.
+-- AUTO MODE — show "Change your key!" when ALL of:
+--   1. Run was completed in time (COMPLETED, not DEPLETED)
+--   2. The keystone was NOT ours (we can only reroll at the vendor on a
+--      foreign key completion — the vendor never lets you reroll your own)
+--   3. The run key level >= our current bag key level
+--      (equal  → vendor reroll is neutral,  safe to offer)
+--      (higher → vendor reroll upgrades us, safe to offer)
+--      (lower  → vendor reroll would downgrade our key, suppress)
 --
--- AUTO MODE:
---   The reroll vendor appears at the end of a foreign-key TIMED run when the
---   bag key level is ≤ the socketed key level. Suppress only when the bag key
---   is strictly HIGHER (rerolling would be a net downgrade) or when no vendor
---   will appear (own-key run, depletion, abandon).
+-- SUPPRESS when ANY of:
+--   • Run was not completed in time (depleted / abandoned / no timed finish)
+--   • It was our own keystone (vendor cannot reroll the owner's key)
+--   • Run level < bag level (reroll would downgrade)
+--   • We have no key in our bag (nothing to reroll)
 --
---     bag=12, run=12 timed → 12 > 12 false → SHOW   (equal, vendor appears)
---     bag=12, run=15 timed → 12 > 15 false → SHOW   (bag lower, vendor appears)
---     bag=13, run=12 timed → 13 > 12 true  → SUPPRESS (bag higher, no benefit)
+-- MANUAL MODE:
+--   Suppress if the run key level is below the user's configured minKeyLevel.
+--   Foreign vs. own does not matter in manual mode (user manages intent).
 --
--- MANUAL (minKeyLevel):
---   Suppress when currentRunLevel (own-key snapshot) is below the threshold.
---   Foreign-key runs (currentRunLevel == nil) are never suppressed here.
 local function ShouldSuppressReminder()
     local autoMode = KeyChangeReminder:Get("autoMode")
 
     if autoMode then
-        -- Own-key run: key upgraded/downgraded in-place; no reroll vendor. Always suppress.
-        if ownKeyRun then return true end
+        -- Rule 1: must be a timed completion.
+        -- (STATE_DEPLETED is handled before this call; kept as safety net.)
+        if runState ~= STATE_COMPLETED then return true end
 
-        -- No socketed-key level recorded → can't make a sound decision; fail open.
-        if not lastRunLevel then return false end
+        -- Rule 2: must be a foreign key run.
+        if ownKeyRun then
+            return true  -- cannot reroll our own key at the vendor
+        end
 
-        -- Depleted or abandoned: reroll vendor never appears. Suppress.
-        if runState == STATE_DEPLETED then return true end
-
-        -- Foreign-key timed run: suppress only if our bag key is strictly higher.
+        -- Rule 3: run level must be >= our bag key level.
         local bagLevel = GetBagKeystoneLevel()
-        if not bagLevel then return true end   -- no key in bag at all; nothing to reroll
+        if not bagLevel then
+            return true  -- no key in bag — nothing to reroll
+        end
+
+        if not lastRunLevel then
+            -- Could not read run level; fail open (show reminder).
+            return false
+        end
+
+        -- bagLevel > runLevel → reroll would downgrade → suppress
+        -- bagLevel <= runLevel → reroll is neutral or an upgrade → SHOW
         if bagLevel > lastRunLevel then return true end
-        return false
+
+        return false  -- SHOW
 
     else
-        -- Manual threshold: only gates own-key runs.
+        -- Manual mode: only gate on the user's minKeyLevel threshold.
         local minLevel = KeyChangeReminder:Get("minKeyLevel") or 0
-        if minLevel > 0 and currentRunLevel and currentRunLevel < minLevel then
+        if minLevel > 0 and lastRunLevel and lastRunLevel < minLevel then
             return true
         end
         return false
@@ -378,10 +341,9 @@ end
 
 -- Reset all per-run state back to neutral.
 local function ResetRunState()
-    runState       = STATE_IDLE
-    lastRunLevel   = nil
-    currentRunLevel = nil
-    ownKeyRun      = false
+    runState     = STATE_IDLE
+    lastRunLevel = nil
+    ownKeyRun    = false
 end
 
 -- ──────────────────────────────────────────────
@@ -404,88 +366,64 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         self:UnregisterEvent("ADDON_LOADED")
 
     -- ── CHALLENGE_MODE_START ────────────────────────────────────────────────
-    -- Fired when the challenge mode instance begins (key placed, timer not yet
-    -- started). The key has already been consumed from the bag at this point.
+    -- Fired when the keystone is socketed and the challenge begins.
+    --
+    -- Ownership: C_PartyInfo.IsChallengeModeKeystoneOwner() is reliable
+    -- immediately at START — no deferred detection needed.
+    --
+    -- Slotted level: C_ChallengeMode.GetSlottedKeystoneInfo() is reliable
+    -- immediately at START.
+    --
+    -- Grace window (5 s): kept solely to eat Midnight's spurious
+    -- CHALLENGE_MODE_RESET that fires as a side-effect of key consumption.
+    -- We do NOT use it for ownership detection anymore.
     elseif event == "CHALLENGE_MODE_START" then
         runGeneration = runGeneration + 1
         local capturedGen = runGeneration
 
-        -- Transition from any state → STARTING
+        -- Transition from any state → STARTING (handles stale runs automatically).
         runState     = STATE_STARTING
         ownKeyRun    = false
         lastRunLevel = nil
-        currentRunLevel = nil
 
-        -- Dismiss any leftover reminder from a previous run
+        -- Dismiss any leftover reminder from a previous run.
         DismissReminder()
         DismissTalentReminder()
 
-        -- Detect whether this run uses our key or a foreign key.
-        -- DetectKeyOwnership() checks whether our bag key is still present;
-        -- if it's gone, we know it was ours.
-        local isOwn, ownLevel, socketedLevel = DetectKeyOwnership()
+        -- Record ownership immediately — API is reliable at START.
+        ownKeyRun = IsLocalPlayerKeystoneOwner()
 
-        ownKeyRun = isOwn
-        lastRunLevel = socketedLevel   -- level of the key now in the socket
+        -- Record run key level immediately from the slotted keystone info.
+        lastRunLevel = GetSlottedKeystoneLevel()
 
-        if isOwn then
-            -- Own-key run: snapshot the level from the socket (bag copy is gone)
-            currentRunLevel = ownLevel
-        else
-            -- Foreign-key run: currentRunLevel stays nil (signals "not our key").
-            -- ownLevel here is our bag key level; we'll re-read it at reminder time.
-            currentRunLevel = nil
-        end
-
-        -- Grace window: Midnight fires a spurious CHALLENGE_MODE_RESET right
-        -- after START as part of consuming the key. Don't trust a RESET as
-        -- genuine depletion until this timer fires.
-        -- Also retry the socketed level if the API wasn't ready yet.
+        -- 5-second grace window: only purpose is to eat the spurious
+        -- CHALLENGE_MODE_RESET Midnight fires right after key consumption.
+        -- Ownership and level are already finalized above.
         C_Timer.After(5, function()
-            if runGeneration ~= capturedGen then return end  -- superseded by a newer run
-            if runState ~= STATE_STARTING then return end    -- already transitioned away
+            if runGeneration ~= capturedGen then return end  -- superseded by newer run
+            if runState ~= STATE_STARTING   then return end  -- already transitioned
 
-            -- Retry socketed level if it came back nil at START
-            if lastRunLevel == nil then
-                lastRunLevel = GetActiveKeystoneLevel()
-                -- Still nil: leave as nil; ShouldSuppressReminder fails open (shows reminder)
+            -- Sanity check: if M+ is no longer active (e.g. group disbanded in
+            -- the first 5 seconds before the grace window elapsed), reset cleanly
+            -- instead of transitioning to IN_PROGRESS on a dead run.
+            if not IsMythicPlusActive() then
+                ResetRunState()
+                return
             end
 
             runState = STATE_IN_PROGRESS
         end)
 
     -- ── CHALLENGE_MODE_COMPLETED ────────────────────────────────────────────
-    -- Fired when all bosses are killed within the time limit (timed run).
+    -- Fired when all bosses are killed within the time limit (timed finish).
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         if runState ~= STATE_IN_PROGRESS then return end
 
         runState = STATE_COMPLETED
         local capturedGen = runGeneration
 
+        -- Small delay so post-run UI settles before we evaluate + show.
         C_Timer.After(3, function()
-            if runGeneration ~= capturedGen then return end  -- new run started during timer
-
-            if ShouldSuppressReminder() then
-                ResetRunState()
-                return
-            end
-
-            KeyChangeReminder:ShowReminder("Change your key!")
-            ResetRunState()
-        end)
-
-    -- ── CHALLENGE_MODE_RESET ────────────────────────────────────────────────
-    -- Fired when a key depletes mid-run, OR spuriously right after START
-    -- (Midnight key-consumption side effect).
-    -- We only act on it if we are IN_PROGRESS; the grace window blocks the
-    -- spurious post-START fire.
-    elseif event == "CHALLENGE_MODE_RESET" then
-        if runState ~= STATE_IN_PROGRESS then return end
-
-        runState = STATE_DEPLETED
-        local capturedGen = runGeneration
-
-        C_Timer.After(2, function()
             if runGeneration ~= capturedGen then return end
 
             if ShouldSuppressReminder() then
@@ -497,6 +435,19 @@ frame:SetScript("OnEvent", function(self, event, arg1)
             ResetRunState()
         end)
 
+    -- ── CHALLENGE_MODE_RESET ────────────────────────────────────────────────
+    -- Fired on genuine key depletion mid-run OR spuriously right after START
+    -- (Midnight's key-consumption artifact).
+    --
+    -- The 5-second grace window in STARTING blocks the spurious post-START
+    -- fire. Only a RESET while IN_PROGRESS is treated as a real depletion.
+    elseif event == "CHALLENGE_MODE_RESET" then
+        if runState ~= STATE_IN_PROGRESS then return end
+
+        -- Genuine depletion/abandon — vendor never appears, always suppress.
+        runState = STATE_DEPLETED
+        ResetRunState()
+
     -- ── PLAYER_REGEN_DISABLED ───────────────────────────────────────────────
     elseif event == "PLAYER_REGEN_DISABLED" then
         DismissReminder()
@@ -504,36 +455,34 @@ frame:SetScript("OnEvent", function(self, event, arg1)
 
     -- ── PLAYER_ENTERING_WORLD ───────────────────────────────────────────────
     elseif event == "PLAYER_ENTERING_WORLD" then
-        -- Dismiss key-change reminder if the player re-enters an instance
-        if reminderWatching then
-            local inInstance, instanceType = IsInInstance()
-            if inInstance and instanceType == "party" then
-                DismissReminder()
-            end
+        -- Dismiss the key-change reminder if we've zoned into an M+ instance
+        -- mid-reminder (e.g. accepted a queue while the banner was still up).
+        if reminderWatching and IsMythicPlusActive() then
+            DismissReminder()
         end
 
-        -- Show talent reminder when entering a M+ dungeon
+        -- Talent reminder: fire after a short delay so the M+ API has settled
+        -- post-load. IsMythicPlusActive() is the clean gate — no need to check
+        -- instance type + bag key presence separately.
         if KeyChangeReminder:Get("talentReminder") then
             C_Timer.After(3, function()
-                local inInstance, instanceType = IsInInstance()
-                local level = C_MythicPlus and C_MythicPlus.GetOwnedKeystoneLevel
-                    and C_MythicPlus.GetOwnedKeystoneLevel()
-                if inInstance and instanceType == "party"
-                   and type(level) == "number" and level > 0 then
+                if IsMythicPlusActive() then
                     KeyChangeReminder:ShowTalentReminder()
                 end
             end)
         end
 
     -- ── ZONE_CHANGED_NEW_AREA ───────────────────────────────────────────────
+    -- Dismiss reminders when leaving an M+ instance entirely.
+    -- IsMythicPlusActive() is false once the player is out of an active run,
+    -- which is exactly the condition we want — more precise than IsInInstance().
     elseif event == "ZONE_CHANGED_NEW_AREA" then
-        local inInstance = select(2, IsInInstance()) ~= "none"
-        if not inInstance then
+        if not IsMythicPlusActive() then
             if reminderWatching       then DismissReminder()       end
             if talentReminderWatching then DismissTalentReminder() end
         end
 
-    end  -- end event chain
+    end
 end)
 
 -- ──────────────────────────────────────────────
@@ -547,49 +496,53 @@ SlashCmdList["KEYCHANGE"] = function(msg)
     local cmd = msg and msg:match("^%s*(%S+)") or ""
 
     if cmd:lower() == "debug" then
-        local bagLevel    = GetBagKeystoneLevel()
-        local bagMapID    = GetBagKeystoneMapID()
-        local activeLevel = GetActiveKeystoneLevel()
-        local activeMapID = GetActiveKeystoneMapID()
-        local autoMode    = KeyChangeReminder:Get("autoMode")
-        local minKeyLevel = KeyChangeReminder:Get("minKeyLevel") or 0
+        local bagLevel         = GetBagKeystoneLevel()
+        local bagChallengeMapID = GetBagKeystoneChallengeMapID()
+        local bagMapID         = GetBagKeystoneMapID()
+        local slotLevel        = GetSlottedKeystoneLevel()
+        local isOwner          = IsLocalPlayerKeystoneOwner()
+        local mpActive         = IsMythicPlusActive()
+        local autoMode         = KeyChangeReminder:Get("autoMode")
+        local minKeyLevel      = KeyChangeReminder:Get("minKeyLevel") or 0
 
         print(FORMAT_SLUG .. COLOR_YELLOW .. " Debug State:|r")
-        print(COLOR_GRAY .. "  runState          : |r" .. COLOR_YELLOW .. tostring(runState)          .. "|r")
-        print(COLOR_GRAY .. "  runGeneration     : |r" .. COLOR_YELLOW .. tostring(runGeneration)     .. "|r")
-        print(COLOR_GRAY .. "  lastRunLevel      : |r" .. COLOR_YELLOW .. tostring(lastRunLevel)      .. "|r")
-        print(COLOR_GRAY .. "  currentRunLevel   : |r" .. COLOR_YELLOW .. tostring(currentRunLevel)   .. "|r")
-        print(COLOR_GRAY .. "  ownKeyRun         : |r" .. COLOR_YELLOW .. tostring(ownKeyRun)         .. "|r")
-        print(COLOR_GRAY .. "  bagLevel (now)    : |r" .. COLOR_YELLOW .. tostring(bagLevel)          .. "|r")
-        print(COLOR_GRAY .. "  bagMapID (now)    : |r" .. COLOR_YELLOW .. tostring(bagMapID)          .. "|r")
-        print(COLOR_GRAY .. "  activeLevel (now) : |r" .. COLOR_YELLOW .. tostring(activeLevel)       .. "|r")
-        print(COLOR_GRAY .. "  activeMapID (now) : |r" .. COLOR_YELLOW .. tostring(activeMapID)       .. "|r")
-        print(COLOR_GRAY .. "  autoMode          : |r" .. COLOR_YELLOW .. tostring(autoMode)          .. "|r")
-        print(COLOR_GRAY .. "  minKeyLevel       : |r" .. COLOR_YELLOW .. tostring(minKeyLevel)       .. "|r")
+        print(COLOR_GRAY .. "  runState                : |r" .. COLOR_YELLOW .. tostring(runState)          .. "|r")
+        print(COLOR_GRAY .. "  runGeneration           : |r" .. COLOR_YELLOW .. tostring(runGeneration)      .. "|r")
+        print(COLOR_GRAY .. "  lastRunLevel            : |r" .. COLOR_YELLOW .. tostring(lastRunLevel)       .. "|r")
+        print(COLOR_GRAY .. "  ownKeyRun               : |r" .. COLOR_YELLOW .. tostring(ownKeyRun)          .. "|r")
+        print(COLOR_GRAY .. "  IsKeystoneOwner (now)   : |r" .. COLOR_YELLOW .. tostring(isOwner)            .. "|r")
+        print(COLOR_GRAY .. "  IsMythicPlusActive (now): |r" .. COLOR_YELLOW .. tostring(mpActive)           .. "|r")
+        print(COLOR_GRAY .. "  bagLevel (now)          : |r" .. COLOR_YELLOW .. tostring(bagLevel)           .. "|r")
+        print(COLOR_GRAY .. "  bagChallengeMapID (now) : |r" .. COLOR_YELLOW .. tostring(bagChallengeMapID)  .. "|r")
+        print(COLOR_GRAY .. "  bagMapID (now)          : |r" .. COLOR_YELLOW .. tostring(bagMapID)           .. "|r")
+        print(COLOR_GRAY .. "  slotLevel (now)         : |r" .. COLOR_YELLOW .. tostring(slotLevel)          .. "|r")
+        print(COLOR_GRAY .. "  autoMode                : |r" .. COLOR_YELLOW .. tostring(autoMode)           .. "|r")
+        print(COLOR_GRAY .. "  minKeyLevel             : |r" .. COLOR_YELLOW .. tostring(minKeyLevel)        .. "|r")
 
-        local reason = "unknown"
+        -- Explain what would happen if we evaluated right now.
+        local reason
         if autoMode then
-            if ownKeyRun then
-                reason = "own key run — always suppress"
-            elseif not lastRunLevel then
-                reason = "lastRunLevel is nil — showing reminder (fail open)"
-            elseif runState == STATE_DEPLETED then
-                reason = "run depleted/abandoned — suppress (no vendor)"
+            if runState ~= STATE_COMPLETED then
+                reason = "run not COMPLETED (state=" .. runState .. ") — suppress"
+            elseif ownKeyRun then
+                reason = "own key run — suppress (cannot reroll own key at vendor)"
             elseif not bagLevel then
                 reason = "no key in bag — suppress (nothing to reroll)"
+            elseif not lastRunLevel then
+                reason = "lastRunLevel nil — SHOW (fail open)"
             elseif bagLevel > lastRunLevel then
-                reason = "bag (" .. bagLevel .. ") > run (" .. lastRunLevel .. ") — suppress (reroll would downgrade)"
+                reason = "bag(" .. bagLevel .. ") > run(" .. lastRunLevel .. ") — suppress (reroll would downgrade)"
             else
-                reason = "bag (" .. tostring(bagLevel) .. ") <= run (" .. tostring(lastRunLevel) .. ") — SHOW reminder"
+                reason = "bag(" .. tostring(bagLevel) .. ") <= run(" .. tostring(lastRunLevel) .. ") — SHOW reminder"
             end
         else
-            if minKeyLevel > 0 and currentRunLevel and currentRunLevel < minKeyLevel then
-                reason = "own key " .. tostring(currentRunLevel) .. " below minKeyLevel " .. minKeyLevel .. " — suppress"
+            if minKeyLevel > 0 and lastRunLevel and lastRunLevel < minKeyLevel then
+                reason = "run level " .. tostring(lastRunLevel) .. " below minKeyLevel " .. minKeyLevel .. " — suppress"
             else
-                reason = "manual mode, no suppression threshold met — SHOW reminder"
+                reason = "manual mode, threshold not met — SHOW reminder"
             end
         end
-        print(COLOR_GRAY .. "  ShouldSuppress?   : |r" .. COLOR_YELLOW .. reason .. "|r")
+        print(COLOR_GRAY .. "  ShouldSuppress?       : |r" .. COLOR_YELLOW .. tostring(reason) .. "|r")
 
     else
         if KeyChangeReminder.optionsCategory then
