@@ -33,3 +33,4 @@ You can fully customize how the message looks and behaves using the settings pan
 - Set to 0 → Always show the reminder.
 - Set to 10 → Only show for +10 keys and higher.
 - (NEW!) Auto Mode - "only remind me if the key in my bag is at least as high as the key that was just run" - Auto is a replacement for the manual min-level slider that
+
