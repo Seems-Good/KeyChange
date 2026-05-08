@@ -299,7 +299,7 @@ end
 --   Suppress if the run key level is below the user's configured minKeyLevel.
 --   Foreign vs. own does not matter in manual mode (user manages intent).
 --
-local function ShouldSuppressReminder()
+local function ShouldSuppressReminder(capturedLevel)
     local autoMode = KeyChangeReminder:Get("autoMode")
 
     if autoMode then
@@ -318,21 +318,24 @@ local function ShouldSuppressReminder()
             return true  -- no key in bag — nothing to reroll
         end
 
-        if not lastRunLevel then
+        -- Use the captured snapshot; fall back to the module-level value.
+        local runLevel = capturedLevel or lastRunLevel
+        if not runLevel then
             -- Could not read run level; fail open (show reminder).
             return false
         end
 
         -- bagLevel > runLevel → reroll would downgrade → suppress
         -- bagLevel <= runLevel → reroll is neutral or an upgrade → SHOW
-        if bagLevel > lastRunLevel then return true end
+        if bagLevel > runLevel then return true end
 
         return false  -- SHOW
 
     else
         -- Manual mode: only gate on the user's minKeyLevel threshold.
+        local runLevel = capturedLevel or lastRunLevel
         local minLevel = KeyChangeReminder:Get("minKeyLevel") or 0
-        if minLevel > 0 and lastRunLevel and lastRunLevel < minLevel then
+        if minLevel > 0 and runLevel and runLevel < minLevel then
             return true
         end
         return false
@@ -419,14 +422,28 @@ frame:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         if runState ~= STATE_IN_PROGRESS then return end
 
+        -- Attempt a last-chance level capture here, while the key may still
+        -- be briefly queryable. This fills the gap if GetSlottedKeystoneInfo()
+        -- returned nil at START (e.g. timing edge cases).
+        if not lastRunLevel then
+            lastRunLevel = GetSlottedKeystoneLevel()
+        end
+
         runState = STATE_COMPLETED
-        local capturedGen = runGeneration
+        local capturedGen   = runGeneration
+        local capturedLevel = lastRunLevel  -- snapshot before async reset races
 
         -- Small delay so post-run UI settles before we evaluate + show.
         C_Timer.After(3, function()
             if runGeneration ~= capturedGen then return end
 
-            if ShouldSuppressReminder() then
+            -- Restore snapshot in case lastRunLevel was cleared by a race
+            -- (e.g. a stray CHALLENGE_MODE_RESET firing before this timer).
+            if not lastRunLevel then
+                lastRunLevel = capturedLevel
+            end
+
+            if ShouldSuppressReminder(capturedLevel) then
                 ResetRunState()
                 return
             end
@@ -496,14 +513,14 @@ SlashCmdList["KEYCHANGE"] = function(msg)
     local cmd = msg and msg:match("^%s*(%S+)") or ""
 
     if cmd:lower() == "debug" then
-        local bagLevel         = GetBagKeystoneLevel()
+        local bagLevel          = GetBagKeystoneLevel()
         local bagChallengeMapID = GetBagKeystoneChallengeMapID()
-        local bagMapID         = GetBagKeystoneMapID()
-        local slotLevel        = GetSlottedKeystoneLevel()
-        local isOwner          = IsLocalPlayerKeystoneOwner()
-        local mpActive         = IsMythicPlusActive()
-        local autoMode         = KeyChangeReminder:Get("autoMode")
-        local minKeyLevel      = KeyChangeReminder:Get("minKeyLevel") or 0
+        local bagMapID          = GetBagKeystoneMapID()
+        local slotLevel         = GetSlottedKeystoneLevel()
+        local isOwner           = IsLocalPlayerKeystoneOwner()
+        local mpActive          = IsMythicPlusActive()
+        local autoMode          = KeyChangeReminder:Get("autoMode")
+        local minKeyLevel       = KeyChangeReminder:Get("minKeyLevel") or 0
 
         print(FORMAT_SLUG .. COLOR_YELLOW .. " Debug State:|r")
         print(COLOR_GRAY .. "  runState                : |r" .. COLOR_YELLOW .. tostring(runState)          .. "|r")
